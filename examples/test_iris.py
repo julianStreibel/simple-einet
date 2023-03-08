@@ -58,7 +58,6 @@ optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 iris = datasets.load_iris()
 X_train, X_test, y_train, y_test = train_test_split(iris.data, iris.target, test_size=0.33, random_state=args.seed)
-print(X_train.shape)
 X_train = torch.tensor(X_train).float().to(device)
 y_train = torch.tensor(y_train).long().to(device)
 X_test = torch.tensor(X_test).float().to(device)
