@@ -10,7 +10,7 @@ from torch import nn
 
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
-from simple_einet.factorized_leaf_layer import FactorizedLeaf
+from simple_einet.factorized_leaf_layer import FactorizedLeaf, ClassConditionalFactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
 from simple_einet.utils import SamplingContext, provide_evidence
@@ -126,6 +126,7 @@ class Einet(nn.Module):
 
         if x.dim() == 4:  # [N, C, H, W]
             x = x.view(x.shape[0], self.config.num_channels, -1)
+
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
 
@@ -182,6 +183,7 @@ class Einet(nn.Module):
 
         einsum_layers = []
 
+        # building layers top down (starting at the root)
         for i in np.arange(start=1, stop=self.config.depth + 1):
 
             if i < self.config.depth:
@@ -712,3 +714,78 @@ class EinetMixture(nn.Module):
             torch.Tensor: Clone of input tensor with NaNs replaced by MPE estimates.
         """
         return self.sample(evidence=evidence, is_mpe=True, marginalized_scopes=marginalized_scopes)
+
+
+
+class CCLEinet(Einet):
+    """
+    Einet with class conditional data leaves.
+    This einet factorizes using the chainrule in its first product node. P(X, Y) = P(X|Y) * P(Y)
+    The class conditional data distribution is modelled with class conditinal leaves.
+    This SPN is not decomposable in its first product node and for the data marginal needs to eliminate Y.
+    """
+
+    def __init__(self, config: EinetConfig, class_idx: int):
+        """
+        Create a RatSpn with class conditional data leaves based on a configuration object.
+
+        Args:
+            config (RatSpnConfig): RatSpn configuration object.
+            class_idx: index of class variable in the data
+        """
+        self.class_idx = class_idx
+        self.num_classes = config.num_classes
+        # setting number of classes to one because we only need one class conditional data dist.
+        config.num_classes = 1
+
+        # using build from parent but with different distribution creation
+        super().__init__(config)
+
+        # change structure further to CCLEinet
+
+
+    def _build_input_distribution(self, num_features_out: int):
+        """Construct the input distribution layer conditioned on the class variable."""
+        
+        base_leaves = list()
+        for i in range(self.num_classes):
+            base_leaf = self.config.leaf_type(
+                num_features=self.config.num_features,
+                num_channels=self.config.num_channels,
+                num_leaves=self.config.num_leaves,
+                num_repetitions=self.config.num_repetitions,
+                **self.config.leaf_kwargs,
+            )
+            base_leaves.append(base_leaf)
+
+        return ClassConditionalFactorizedLeaf(
+            num_features=base_leaf.out_features,
+            num_features_out=num_features_out,
+            num_repetitions=self.config.num_repetitions,
+            base_leaves=base_leaves,
+            class_idx=self.class_idx
+        )
+
+
+    def sample(
+        self,
+        num_samples: int = None,
+        class_index=None,
+        evidence: torch.Tensor = None,
+        is_mpe: bool = False,
+        mpe_at_leaves: bool = False,
+        temperature_leaves: float = 1.0,
+        temperature_sums: float = 1.0,
+        marginalized_scopes: List[int] = None,
+    ):
+        # TODO
+        raise NotImplentedError("sampling is not implemented jet for CCLEinet")
+
+
+    def mpe(
+        self,
+        evidence: torch.Tensor = None,
+        marginalized_scopes: List[int] = None,
+    ) -> torch.Tensor:
+        # TODO
+        raise NotImplentedError("mpe is not implemented jet for CCLEinet")
