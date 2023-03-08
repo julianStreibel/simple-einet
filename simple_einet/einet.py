@@ -126,7 +126,6 @@ class Einet(nn.Module):
 
         if x.dim() == 4:  # [N, C, H, W]
             x = x.view(x.shape[0], self.config.num_channels, -1)
-
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
 

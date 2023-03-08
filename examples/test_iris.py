@@ -49,7 +49,8 @@ args = parser.parse_args()
 device = torch.device(args.device)
 torch.manual_seed(args.seed)
 
-config = EinetConfig(in_features=4, D=args.D, S=args.K, I=args.K, R=args.R, C=3, leaf_base_class=RatNormal, leaf_base_kwargs={}, dropout=0.0)
+# config = EinetConfig(in_features=4, D=args.D, S=args.K, I=args.K, R=args.R, C=3, leaf_base_class=RatNormal, leaf_base_kwargs={}, dropout=0.0)
+config = EinetConfig(num_features=4, num_channels=args.D, num_sums=args.K, num_leaves=args.K, num_repetitions=args.R, num_classes=3, leaf_type=RatNormal, leaf_kwargs={}, dropout=0.0)
 model = Einet(config).to(device)
 print("Number of parameters:", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
@@ -57,6 +58,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 iris = datasets.load_iris()
 X_train, X_test, y_train, y_test = train_test_split(iris.data, iris.target, test_size=0.33, random_state=args.seed)
+print(X_train.shape)
 X_train = torch.tensor(X_train).float().to(device)
 y_train = torch.tensor(y_train).long().to(device)
 X_test = torch.tensor(X_test).float().to(device)

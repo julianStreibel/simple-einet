@@ -6,5 +6,5 @@ This directory contains some example scripts.
 
 ```shell
 pip install sklearn
-PYTHONPATH=./ python examples/test_iris.py --device cpu --lr 0.1 -D 2 --epochs 20
+PYTHONPATH=./ python3 examples/test_iris.py --device cpu --lr 0.07 -D 1 --epochs 40
 ```
