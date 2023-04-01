@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 
 
 SEED = 1
+SHOW_LOSS = False
 
 device = torch.device("cpu")
 torch.manual_seed(SEED)
@@ -37,7 +38,7 @@ def score_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx
     y_test = test_data[:, class_idx].long()
 
     config = EinetConfig(
-        num_features=4,
+        num_features=64,
         num_channels=D,
         num_sums=K,
         num_leaves=K,
@@ -89,7 +90,7 @@ def score_einet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx=4
     y_test = test_data[:, class_idx].long()
 
     config = EinetConfig(
-        num_features=4,
+        num_features=64,
         num_channels=D,
         num_sums=K,
         num_leaves=K,
@@ -142,8 +143,8 @@ def k_fold(
     K_FOLDS=10,
     show=False
 ):
-    iris = datasets.load_iris()
-    data = np.hstack((iris.data, np.expand_dims(iris.target, axis=1)))
+    digits = datasets.load_digits()
+    data = np.hstack((digits.data, np.expand_dims(digits.target, axis=1)))
 
     einet_scores_list = list()
     cceinet_scores_list = list()
@@ -155,10 +156,10 @@ def k_fold(
         X_train = torch.tensor(X_train).float().to(device)
         X_test = torch.tensor(X_test).float().to(device)
 
-        einet_scores = score_einet(X_train, X_test, D=1, K=K, R=R, num_classes=3,
-                                   class_idx=4, dropout=0.0, epochs=EPOCHS, lr=LR_EINET)
+        einet_scores = score_einet(X_train, X_test, D=1, K=K, R=R, num_classes=10,
+                                   class_idx=-1, dropout=0.0, epochs=EPOCHS, lr=LR_EINET)
         cceinet_scores = score_cceinet(
-            X_train, X_test, D=1, K=K, R=R, num_classes=3, class_idx=4, dropout=0.0, epochs=EPOCHS, lr=LR_CCEINET)
+            X_train, X_test, D=1, K=K, R=R, num_classes=10, class_idx=-1, dropout=0.0, epochs=EPOCHS, lr=LR_CCEINET)
 
         einet_scores_list.append(einet_scores)
         cceinet_scores_list.append(cceinet_scores)
@@ -176,29 +177,31 @@ def k_fold(
 
     plt.figure()
     for i, (name, color) in enumerate([("loss", "blue"), ("train acc", "red"), ("test acc", "green")]):
-        plt.plot(x, einet_scores_mean[i],
-                 label=f"einet {name} mean", color=f"{color}")
-        plt.fill_between(
-            x,
-            einet_scores_mean[i] - einet_scores_std[i],
-            einet_scores_mean[i] + einet_scores_std[i],
-            alpha=0.2,
-            color=color
-        )
+        if i == 0 and SHOW_LOSS or i > 0:
+            plt.plot(x, einet_scores_mean[i],
+                     label=f"einet {name} mean", color=f"{color}")
+            plt.fill_between(
+                x,
+                einet_scores_mean[i] - einet_scores_std[i],
+                einet_scores_mean[i] + einet_scores_std[i],
+                alpha=0.2,
+                color=color
+            )
     plt.title(f"Einet: K={K}, R={R}, lr={LR_EINET}")
     plt.legend()
 
     plt.figure()
     for i, (name, color) in enumerate([("loss", "blue"), ("train acc", "red"), ("test acc", "green")]):
-        plt.plot(x, cceinet_scores_mean[i],
-                 label=f"cceinet {name} mean", color=f"dark{color}")
-        plt.fill_between(
-            x,
-            cceinet_scores_mean[i] - cceinet_scores_std[i],
-            cceinet_scores_mean[i] + cceinet_scores_std[i],
-            alpha=0.2,
-            color=color
-        )
+        if i == 0 and SHOW_LOSS or i > 0:
+            plt.plot(x, cceinet_scores_mean[i],
+                     label=f"cceinet {name} mean", color=f"dark{color}")
+            plt.fill_between(
+                x,
+                cceinet_scores_mean[i] - cceinet_scores_std[i],
+                cceinet_scores_mean[i] + cceinet_scores_std[i],
+                alpha=0.2,
+                color=color
+            )
     plt.title(f"CCEinet: K={K}, R={R}, lr={LR_CCEINET}")
     plt.legend()
     if show:
@@ -213,10 +216,21 @@ if __name__ == "__main__":
     # plt.show()
 
     # best params for einet
-    k_fold(LR_EINET=0.05349491294870641, LR_CCEINET=0.05349491294870641,
-           EPOCHS=100, K=15, R=19, K_FOLDS=5)
+    k_fold(
+        LR_EINET=1.4350907130085637,
+        LR_CCEINET=1.4350907130085637,
+        EPOCHS=100,
+        K=7,
+        R=6,
+        K_FOLDS=5)
 
     # best parrams for cceinet
-    k_fold(LR_EINET=0.522016997420737, LR_CCEINET=0.522016997420737,
-           EPOCHS=100, K=18, R=10, K_FOLDS=5)
+    k_fold(
+        LR_EINET=0.99254923282291,
+        LR_CCEINET=0.99254923282291,
+        EPOCHS=100,
+        K=7,
+        R=1,
+        K_FOLDS=5)
+
     plt.show()

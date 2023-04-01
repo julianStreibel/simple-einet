@@ -9,7 +9,7 @@ from simple_einet.einet import CCLEinet, EinetConfig
 
 import numpy as np
 
-parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
+parser = argparse.ArgumentParser(description="PyTorch Digits Example")
 parser.add_argument(
     "--batch-size",
     type=int,
@@ -43,9 +43,10 @@ parser.add_argument(
 )
 parser.add_argument("-K", type=int, default=3)
 parser.add_argument("-D", type=int, default=1)
-parser.add_argument("--depth", type=int, default=1)
 parser.add_argument("-R", type=int, default=3)
+parser.add_argument("--depth", type=int, default=1)
 parser.add_argument("--num_classes", type=int, default=3)
+parser.add_argument("--dropout", type=float, default=0.0)
 
 args = parser.parse_args()
 
@@ -53,7 +54,7 @@ device = torch.device("cpu")
 torch.manual_seed(args.seed)
 
 config = EinetConfig(
-    num_features=4,
+    num_features=64,
     num_channels=args.D,
     num_sums=args.K,
     num_leaves=args.K,
@@ -63,21 +64,22 @@ config = EinetConfig(
     leaf_type=CCRatNormal,
     depth=args.depth,
     leaf_kwargs={},
-    dropout=0.0)
+    dropout=args.dropout)
 model = CCLEinet(config).to(device)
 print("Number of parameters:", sum(p.numel()
       for p in model.parameters() if p.requires_grad))
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-iris = datasets.load_iris()
+digits = datasets.load_digits(n_class=args.num_classes)
 X_train, X_test, y_train, y_test = train_test_split(
-    iris.data, iris.target, test_size=0.33, random_state=args.seed)
+    digits.data, digits.target, test_size=0.33, random_state=args.seed)
 X_train = torch.tensor(X_train).float().to(device)
 y_train = torch.tensor(y_train).long().to(device)
 X_test = torch.tensor(X_test).float().to(device)
 y_test = torch.tensor(y_test).long().to(device)
 
+# breakpoint()
 
 train_conditional = False
 test_conditional = False

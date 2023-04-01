@@ -17,11 +17,19 @@ import matplotlib.pyplot as plt
 
 SEED = 1
 K_FOLDS = 5
-EPOCHS = 100
-TRIALS = 100
+EPOCHS = 50
+TRIALS = 50
+CLASS_IDX = -1
 
-IRIS = datasets.load_iris()
-DATA = np.hstack((IRIS.data, np.expand_dims(IRIS.target, axis=1)))
+# IRIS = datasets.load_iris()
+# DATA = np.hstack((IRIS.data, np.expand_dims(IRIS.target, axis=1)))
+# NUM_FEATURES = 4
+# NUM_CLASSES = 3
+
+DIGITS = datasets.load_digits()
+DATA = np.hstack((DIGITS.data, np.expand_dims(DIGITS.target, axis=1)))
+NUM_FEATURES = 64
+NUM_CLASSES = 10
 
 device = torch.device("cpu")
 torch.manual_seed(SEED)
@@ -46,11 +54,12 @@ def score_one_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class
     y_test = test_data[:, class_idx].long()
 
     config = EinetConfig(
-        num_features=4,
+        num_features=NUM_FEATURES,
         num_channels=D,
         num_sums=K,
         num_leaves=K,
         num_repetitions=R,
+        cross_product=True,
         num_classes=num_classes,
         leaf_type=CCRatNormal,
         dropout=dropout)
@@ -88,11 +97,12 @@ def score_one_einet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_i
     y_test = test_data[:, class_idx].long()
 
     config = EinetConfig(
-        num_features=4,
+        num_features=NUM_FEATURES,
         num_channels=D,
         num_sums=K,
         num_leaves=K,
         num_repetitions=R,
+        cross_product=True,
         num_classes=num_classes,
         leaf_type=RatNormal,
         leaf_kwargs={},
@@ -130,8 +140,8 @@ def score_einet(data, K=3, R=3, lr=0.07):
         X_train = torch.tensor(X_train).float().to(device)
         X_test = torch.tensor(X_test).float().to(device)
 
-        einet_scores = score_one_einet(X_train, X_test, D=1, K=K, R=R, num_classes=3,
-                                       class_idx=4, dropout=0.0, epochs=EPOCHS, lr=lr)
+        einet_scores = score_one_einet(X_train, X_test, D=1, K=K, R=R, num_classes=NUM_CLASSES,
+                                       class_idx=CLASS_IDX, dropout=0.0, epochs=EPOCHS, lr=lr)
         einet_scores_list.append(einet_scores)
 
     einet_scores_array = np.array(einet_scores_list)
@@ -150,7 +160,7 @@ def score_cceinet(data, K=3, R=3, lr=0.07):
         X_test = torch.tensor(X_test).float().to(device)
 
         cceinet_scores = score_one_cceinet(
-            X_train, X_test, D=1, K=K, R=R, num_classes=3, class_idx=4, dropout=0.0, epochs=EPOCHS, lr=lr)
+            X_train, X_test, D=1, K=K, R=R, num_classes=NUM_CLASSES, class_idx=CLASS_IDX, dropout=0.0, epochs=EPOCHS, lr=lr)
 
         cceinet_scores_list.append(cceinet_scores)
 
@@ -160,16 +170,16 @@ def score_cceinet(data, K=3, R=3, lr=0.07):
 
 
 def score_einet_proxy(trial):
-    K = trial.suggest_int("K", 1, 20)
-    R = trial.suggest_int("R", 1, 20)
+    K = trial.suggest_int("K", 1, 5)
+    R = trial.suggest_int("R", 1, 5)
     lr = trial.suggest_float("lr", 0.0001, 1)
 
     return score_einet(DATA, K, R, lr)
 
 
 def score_cceinet_proxy(trial):
-    K = trial.suggest_int("K", 1, 20)
-    R = trial.suggest_int("R", 1, 20)
+    K = trial.suggest_int("K", 1, 5)
+    R = trial.suggest_int("R", 1, 5)
     lr = trial.suggest_float("lr", 0.0001, 1)
 
     return score_cceinet(DATA, K, R, lr)
