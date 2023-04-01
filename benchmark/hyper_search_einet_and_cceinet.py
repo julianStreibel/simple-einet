@@ -103,7 +103,7 @@ def score_one_einet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_i
 
     test_acc_list = list()
 
-    cross_entropy = torch.nn.CrossEntropyLoss()
+    cross_entropy = torch.nn.NLLLoss()
 
     for epoch in range(epochs):
         optimizer.zero_grad()

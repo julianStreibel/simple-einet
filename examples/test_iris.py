@@ -77,7 +77,7 @@ def accuracy(model, X, y):
         return acc
 
 
-cross_entropy = torch.nn.CrossEntropyLoss()
+cross_entropy = torch.nn.NLLLoss()
 
 for epoch in range(args.epochs):
     optimizer.zero_grad()

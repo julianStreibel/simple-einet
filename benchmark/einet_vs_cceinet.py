@@ -44,6 +44,7 @@ def score_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx
         num_repetitions=R,
         num_classes=num_classes,
         leaf_type=CCRatNormal,
+        cross_product=True,
         dropout=dropout)
     model = CCLEinet(config).to(device)
     print("Number of parameters in CCEinet:", sum(p.numel()
@@ -95,6 +96,7 @@ def score_einet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx=4
         num_repetitions=R,
         num_classes=num_classes,
         leaf_type=RatNormal,
+        cross_product=True,
         leaf_kwargs={},
         dropout=dropout)
     model = Einet(config).to(device)
@@ -110,7 +112,7 @@ def score_einet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx=4
     train_acc_list = list()
     test_acc_list = list()
 
-    cross_entropy = torch.nn.CrossEntropyLoss()
+    cross_entropy = torch.nn.NLLLoss()
 
     for epoch in range(epochs):
         optimizer.zero_grad()
