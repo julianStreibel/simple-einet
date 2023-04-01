@@ -10,7 +10,7 @@ from torch import nn
 
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_, CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
-from simple_einet.factorized_leaf_layer import FactorizedLeaf
+from simple_einet.factorized_leaf_layer import FactorizedLeaf, CCLFactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
 from simple_einet.utils import SamplingContext, provide_evidence
@@ -747,24 +747,20 @@ class CCLEinet(Einet):
     This SPN is not decomposable in its first product node and for the data marginal needs to eliminate Y.
     """
 
-    def __init__(self, config: EinetConfig, class_idx: int):
+    def __init__(self, config: EinetConfig):
         """
         Create a RatSpn with class conditional data leaves based on a configuration object.
 
         Args:
             config (RatSpnConfig): RatSpn configuration object.
-            class_idx: index of class variable in the data
         """
-        self.class_idx = class_idx
         self.num_classes = config.num_classes
         if config.leaf_kwargs is not None:
             config.leaf_kwargs = {
                 **config.leaf_kwargs,
-                "class_idx": class_idx,
                 "num_classes": self.num_classes}
         else:
             config.leaf_kwargs = {
-                "class_idx": class_idx,
                 "num_classes": self.num_classes}
 
         # setting number of classes to one because we only need one class conditional data dist.
@@ -772,6 +768,24 @@ class CCLEinet(Einet):
 
         # using build from parent but with different distribution creation
         super().__init__(config)
+
+    def _build_input_distribution(self, num_features_out: int):
+        """Construct the input distribution layer."""
+        # Cardinality is the size of the region in the last partitions
+        base_leaf = self.config.leaf_type(
+            num_features=self.config.num_features,
+            num_channels=self.config.num_channels,
+            num_leaves=self.config.num_leaves,
+            num_repetitions=self.config.num_repetitions,
+            **self.config.leaf_kwargs,
+        )
+
+        return CCLFactorizedLeaf(
+            num_features=base_leaf.out_features,
+            num_features_out=num_features_out,
+            num_repetitions=self.config.num_repetitions,
+            base_leaf=base_leaf,
+        )
 
     def _build(self):
         """Construct the internal architecture of the RatSpn with class conditional leaves."""
@@ -848,12 +862,13 @@ class CCLEinet(Einet):
         self._class_dist = CustomCategorical(
             self.num_classes, self.config.num_repetitions)
 
-    def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, y: torch.Tensor = None, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
         """
         Inference pass for the Class Conditinal Leave Einet model.
 
         Args:
           x (torch.Tensor): Input data of shape [N, C, D], where C is the number of input channels (useful for images) and D is the number of features/random variables (H*W for images).
+          y (torch.Tensor): Input data of shape [N] if given returning only the class conditional likelihood/joint of the given class
           marginalized_scope: torch.Tensor:  (Default value = None)
 
         Returns:
@@ -872,48 +887,53 @@ class CCLEinet(Einet):
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
 
-        if self.training:  # if in train -> do one upwards pass
+        if y is not None:  # if in train -> do one upwards pass
             x = self._one_class_forward(
-                x, marginalization_mask=marginalization_mask, return_conditional=return_conditional)
-        else:  # if in eval -> do C upwards passes TODO: make this as a batch with artificial classes
+                x,
+                y=y,
+                marginalization_mask=marginalization_mask,
+                return_conditional=return_conditional
+            )
+        else:  # if y is None -> do C upwards passes TODO: make this as a batch with artificial classes
             res = list()
             x_copy = x.clone()
             for i in range(self.num_classes):
-                x_copy[:, :, self.class_idx] = i
+                y = (torch.ones(x.shape[0]) * i).to(torch.int64)
                 res.append(self._one_class_forward(
-                    x_copy, marginalization_mask=marginalization_mask, return_conditional=return_conditional))
+                    x_copy,
+                    y,
+                    marginalization_mask=marginalization_mask,
+                    return_conditional=return_conditional))
             x = torch.stack(res).T.squeeze(0)
 
         return x
 
-    def _one_class_forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
+    def _one_class_forward(self, x: torch.Tensor, y: torch.Tensor, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
         """
         Inference pass with one class. p(X, Y=y)
         """
 
-        class_labels = (
-            x[:, :, self.class_idx]  # get class
-            .to(torch.int64)  # make index
-        )
+        # check for right shape of y
+        # y = y.reshape(1, -1)
 
-        # Apply leaf distributions (replace marginalization indicators with 0.0 first)
-        # TODO: how to signal that y can't be nan in training
-        conditional_log_likelihood = self.leaf(x, marginalization_mask)
+        class_conditional_log_likelihood = self.leaf(
+            x, y, marginalization_mask)
 
         # Pass through intermediate layers
-        conditional_log_likelihood = self._forward_layers(
-            conditional_log_likelihood)
+        class_conditional_log_likelihood = self._forward_layers(
+            class_conditional_log_likelihood)
 
         if return_conditional:
             # set class conditionals two ones (zero in log space)
-            class_log_likelihood = torch.zeros_like(conditional_log_likelihood)
+            class_log_likelihood = torch.zeros_like(
+                class_conditional_log_likelihood)
         else:
             # add channel and feature dim to class probs
             class_log_likelihood = self._class_dist(
-                class_labels).unsqueeze(1).unsqueeze(1)
+                y).unsqueeze(1).unsqueeze(1)
 
-        joint_log_likelihod = conditional_log_likelihood.add(
-            class_log_likelihood)
+        joint_log_likelihod = class_conditional_log_likelihood.add(
+            class_log_likelihood)  # TODO: replace to einsum layer
 
         # If model has multiple reptitions, perform repetition mixing
         if self.config.num_repetitions > 1:
@@ -923,7 +943,7 @@ class CCLEinet(Einet):
             # Remove repetition index
             joint_log_likelihod = joint_log_likelihod.squeeze(-1)
 
-        batch_size, features, channels, repetitions = conditional_log_likelihood.size()
+        batch_size, features, channels, repetitions = class_conditional_log_likelihood.size()
         assert features == 1  # number of features should be 1 at this point
         assert channels == self.config.num_classes
 

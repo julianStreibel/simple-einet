@@ -27,7 +27,8 @@ parser.add_argument(
 parser.add_argument(
     "--lr", type=float, default=1, metavar="LR", help="learning rate (default: 1)"
 )
-parser.add_argument("--seed", type=int, default=1, metavar="S", help="random seed (default: 1)")
+parser.add_argument("--seed", type=int, default=1,
+                    metavar="S", help="random seed (default: 1)")
 parser.add_argument(
     "--log-interval",
     type=int,
@@ -45,7 +46,6 @@ parser.add_argument("-D", type=int, default=1)
 parser.add_argument("--depth", type=int, default=1)
 parser.add_argument("-R", type=int, default=3)
 parser.add_argument("--num_classes", type=int, default=3)
-parser.add_argument("--class_idx", type=int, default=4)
 
 args = parser.parse_args()
 
@@ -63,20 +63,24 @@ config = EinetConfig(
     depth=args.depth,
     leaf_kwargs={},
     dropout=0.0)
-model = CCLEinet(config, class_idx=args.class_idx).to(device)
-print("Number of parameters:", sum(p.numel() for p in model.parameters() if p.requires_grad))
+model = CCLEinet(config).to(device)
+print("Number of parameters:", sum(p.numel()
+      for p in model.parameters() if p.requires_grad))
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 iris = datasets.load_iris()
-data = np.hstack((iris.data, np.expand_dims(iris.target, axis=1)))
-X_train, X_test = train_test_split(data, test_size=0.33, random_state=args.seed)
+X_train, X_test, y_train, y_test = train_test_split(
+    iris.data, iris.target, test_size=0.33, random_state=args.seed)
 X_train = torch.tensor(X_train).float().to(device)
+y_train = torch.tensor(y_train).long().to(device)
 X_test = torch.tensor(X_test).float().to(device)
+y_test = torch.tensor(y_test).long().to(device)
 
 
 train_conditional = False
 test_conditional = False
+
 
 def accuracy(model, X, y):
     with torch.no_grad():
@@ -87,19 +91,20 @@ def accuracy(model, X, y):
         acc = correct / total * 100
         return acc
 
+
 model.train()
 for epoch in range(args.epochs):
     optimizer.zero_grad()
 
-    outputs = model(X_train, return_conditional=train_conditional)
+    outputs = model(X_train, y=y_train, return_conditional=train_conditional)
     loss = -outputs.mean()
 
     loss.backward()
     optimizer.step()
 
     model.eval()
-    acc_train = accuracy(model, X_train, X_train[:, args.class_idx])
-    acc_test = accuracy(model, X_test, X_test[:, args.class_idx])
+    acc_train = accuracy(model, X_train, y_train)
+    acc_test = accuracy(model, X_test, y_test)
     model.train()
 
     print(
@@ -110,4 +115,3 @@ for epoch in range(args.epochs):
             acc_test,
         )
     )
-

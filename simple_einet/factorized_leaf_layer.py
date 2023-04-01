@@ -43,7 +43,8 @@ class FactorizedLeaf(AbstractLayer):
         cardinality = int(np.round(self.num_features / self.num_features_out))
 
         # Construct mapping of scopes from in_features -> out_features
-        scopes = torch.zeros(num_features, self.num_features_out, num_repetitions)
+        scopes = torch.zeros(
+            num_features, self.num_features_out, num_repetitions)
         for r in range(num_repetitions):
             idxs = torch.randperm(n=self.num_features)
             for o in range(num_features_out):
@@ -100,13 +101,16 @@ class FactorizedLeaf(AbstractLayer):
             )
 
         if not context.is_differentiable:
-            scopes = self.scopes[..., context.indices_repetition].permute(2, 0, 1)
-            rnge_in = torch.arange(self.num_features_out, device=samples.device)
+            scopes = self.scopes[...,
+                                 context.indices_repetition].permute(2, 0, 1)
+            rnge_in = torch.arange(self.num_features_out,
+                                   device=samples.device)
             scopes = (scopes * rnge_in).sum(-1).long()
             indices_in_gather = indices_out.gather(dim=1, index=scopes)
             indices_in_gather = indices_in_gather.view(num_samples, 1, -1, 1)
 
-            indices_in_gather = indices_in_gather.expand(-1, samples.shape[1], -1, -1)
+            indices_in_gather = indices_in_gather.expand(
+                -1, samples.shape[1], -1, -1)
             samples = samples.gather(dim=-1, index=indices_in_gather)
             samples.squeeze_(-1)  # Remove num_leaves dimension
         else:
@@ -123,10 +127,12 @@ class FactorizedLeaf(AbstractLayer):
             # samples_orig.squeeze_(-1)  # Remove num_leaves dimension
 
             scopes = self.scopes.unsqueeze(0)  # make space for batch dim
-            r_idx = context.indices_repetition.view(context.num_samples, 1, 1, -1)
+            r_idx = context.indices_repetition.view(
+                context.num_samples, 1, 1, -1)
             scopes = index_one_hot(scopes, index=r_idx, dim=-1)
 
-            indices_in = index_one_hot(indices_out.unsqueeze(1), index=scopes.unsqueeze(-1), dim=2)
+            indices_in = index_one_hot(indices_out.unsqueeze(
+                1), index=scopes.unsqueeze(-1), dim=2)
 
             indices_in = indices_in.unsqueeze(1)  # make space for channel dim
             samples = index_one_hot(samples, index=indices_in, dim=-1)
@@ -134,6 +140,58 @@ class FactorizedLeaf(AbstractLayer):
             # assert (samples - samples_orig).sum() < 1e-4
 
         return samples
+
+    def extra_repr(self):
+        return f"num_features={self.num_features}, num_features_out={self.num_features_out}"
+
+
+class CCLFactorizedLeaf(FactorizedLeaf):
+    """
+    A 'meta'-leaf layer that combines multiple scopes of a base-leaf layer via naive factorization and supports class conditional leaves.
+
+    Attributes:
+        base_leaf: Base leaf layer that contains the actual leaf distribution.
+        in_features: Number of input features/RVs.
+        out_features: Number of output features/RVs. This determines the factorization group size (round(in_features / out_features))
+        scopes: One-hot mapping from which in_features correspond to which out_features.
+
+    """
+
+    def __init__(
+        self,
+        **args,
+    ):
+        """
+        Args:
+            in_features (int): Number of input features/RVs.
+            out_features (int): Number of output features/RVs.
+            num_repetitions (int): Number of repetitions.
+            base_leaf (Leaf): Base leaf distribution object.
+        """
+
+        super().__init__(**args)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor, marginalized_scopes: List[int]):
+        # Forward through base leaf
+        x = self.base_leaf(x, y, marginalized_scopes)
+
+        # Factorize input channels
+        x = x.sum(dim=1)
+
+        # Merge scopes by naive factorization
+        x = torch.einsum("bicr,ior->bocr", x, self.scopes)
+
+        assert x.shape == (
+            x.shape[0],
+            self.num_features_out,
+            self.base_leaf.num_leaves,
+            self.num_repetitions,
+        )
+        return x
+
+    def sample(self, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:
+        raise NotImplementedError(
+            "Sampling in CCLFactorizedLeaf not implemented jet.")
 
     def extra_repr(self):
         return f"num_features={self.num_features}, num_features_out={self.num_features_out}"

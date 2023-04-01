@@ -1,12 +1,13 @@
 from typing import Tuple
 
 import torch
-from simple_einet.distributions.abstract_leaf import AbstractLeaf
+from simple_einet.distributions.abstract_leaf import AbstractLeaf, dist_forward
 from simple_einet.type_checks import check_valid
 from torch import distributions as dist
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
+from typing import List
 
 from simple_einet.utils import SamplingContext
 
@@ -140,7 +141,6 @@ class CCRatNormal(AbstractLeaf):
         max_sigma: float = 1.0,
         min_mean: float = None,
         max_mean: float = None,
-        class_idx: int = None,
         num_classes: int = None
     ):
         """Creat a class conditioned gaussian layer.
@@ -148,7 +148,6 @@ class CCRatNormal(AbstractLeaf):
         Args:
             out_channels: Number of parallel representations for each input feature.
             in_features: Number of input features.
-            class_idx: index of the class varibale in the data
             num_classes: number of classes in the data
 
         """
@@ -159,7 +158,6 @@ class CCRatNormal(AbstractLeaf):
             num_channels=num_channels,
         )
 
-        self.class_idx = class_idx
         self.num_classes = num_classes
 
         # Create gaussian means and stds
@@ -196,17 +194,25 @@ class CCRatNormal(AbstractLeaf):
             means = torch.sigmoid(self.means) * mean_range + self.min_mean
 
         # d = dist.Normal(means, sigma)
-        d = CustomCCNormal(means, sigma, self.class_idx, self.num_classes)
+        d = CustomCCNormal(means, sigma, self.num_classes)
         return d
+
+    def forward(self, x, y, marginalized_scopes: List[int]):
+        # Forward through base distribution
+        d = self._get_base_distribution()
+        x = dist_forward(d, x, y)
+
+        x = self._marginalize_input(x, marginalized_scopes)
+
+        return x
 
 
 class CustomCCNormal:
     """ Class Conditioned Normal class """
 
-    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor, class_idx: int, num_classes: int):
+    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor, num_classes: int):
         self.mu = mu
         self.sigma = sigma
-        self.class_idx = class_idx
         self.num_classes = num_classes
 
     def sample(self, sample_shape: Tuple[int]):
@@ -217,20 +223,14 @@ class CustomCCNormal:
         raise NotImplementedError(
             "Sampling in CustomCCNormal not implemented jet.")
 
-    def log_prob(self, x):
-
-        # remove and save class variable from features
-        class_feature = x[:, :, self.class_idx, :, :].flatten().to(torch.int64)
-        num_features = x.shape[2]
-        x_without_class_feature = x[:, :, np.r_[
-            :self.class_idx, self.class_idx+1:num_features], :, :]
+    def log_prob(self, x, y):
 
         # taking mu and sigma for the right class
-        mu = self.mu[..., class_feature].permute(4, 0, 1, 2, 3)
-        sigma = self.sigma[..., class_feature].permute(4, 0, 1, 2, 3)
+        mu = self.mu[..., y].permute(4, 0, 1, 2, 3)
+        sigma = self.sigma[..., y].permute(4, 0, 1, 2, 3)
 
         log_class_conditional_likelihood = dist.Normal(
-            mu, sigma).log_prob(x_without_class_feature)
+            mu, sigma).log_prob(x)
 
         assert log_class_conditional_likelihood.shape == (
             x.shape[0], *self.mu.shape[:-1]
