@@ -59,6 +59,7 @@ config = EinetConfig(
     num_leaves=args.K,
     num_repetitions=args.R,
     num_classes=args.num_classes,
+    cross_product=True,
     leaf_type=CCRatNormal,
     depth=args.depth,
     leaf_kwargs={},

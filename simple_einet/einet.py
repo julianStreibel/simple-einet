@@ -862,6 +862,14 @@ class CCLEinet(Einet):
         self._class_dist = CustomCategorical(
             self.num_classes, self.config.num_repetitions)
 
+        self._joint_layer = EinsumLayer(
+            num_features=2,
+            num_sums_in=1,  # ?
+            num_sums_out=1,
+            num_repetitions=self.config.num_repetitions,
+            dropout=self.config.dropout,
+        )
+
     def forward(self, x: torch.Tensor, y: torch.Tensor = None, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
         """
         Inference pass for the Class Conditinal Leave Einet model.
@@ -932,8 +940,12 @@ class CCLEinet(Einet):
             class_log_likelihood = self._class_dist(
                 y).unsqueeze(1).unsqueeze(1)
 
-        joint_log_likelihod = class_conditional_log_likelihood.add(
-            class_log_likelihood)  # TODO: replace to einsum layer
+        # stack class_conditional_log_likelihood and class_log_likelihood
+        # in feature dimension and pass thorugh the joint einsum layer
+        joint_layer_input = torch.stack(
+            (class_conditional_log_likelihood, class_log_likelihood), dim=1).squeeze(2)
+
+        joint_log_likelihod = self._joint_layer(joint_layer_input)
 
         # If model has multiple reptitions, perform repetition mixing
         if self.config.num_repetitions > 1:
