@@ -60,7 +60,8 @@ class EinetConfig:
         self.num_sums = check_valid(self.num_sums, int, 1)
         self.num_repetitions = check_valid(self.num_repetitions, int, 1)
         self.num_leaves = check_valid(self.num_leaves, int, 1)
-        self.dropout = check_valid(self.dropout, float, 0.0, 1.0, allow_none=True)
+        self.dropout = check_valid(
+            self.dropout, float, 0.0, 1.0, allow_none=True)
         assert self.leaf_type is not None, "EinetConfig.leaf_type parameter was not set!"
 
         assert isinstance(self.leaf_type, type) and issubclass(
@@ -228,10 +229,12 @@ class Einet(nn.Module):
             einsum_layers.append(layer)
 
         # Construct leaf
-        self.leaf = self._build_input_distribution(num_features_out=einsum_layers[-1].num_features)
+        self.leaf = self._build_input_distribution(
+            num_features_out=einsum_layers[-1].num_features)
 
         # List layers in a bottom-to-top fashion
-        self.einsum_layers: Sequence[EinsumLayer] = nn.ModuleList(reversed(einsum_layers))
+        self.einsum_layers: Sequence[EinsumLayer] = nn.ModuleList(
+            reversed(einsum_layers))
 
         # If model has multiple reptitions, add repetition mixing layer
         if self.config.num_repetitions > 1:
@@ -249,7 +252,8 @@ class Einet(nn.Module):
             num_repetitions=1,
         )
         self._sampling_root.weights = nn.Parameter(
-            torch.ones(size=(1, self.config.num_classes, 1, 1)) * torch.tensor(1 / self.config.num_classes),
+            torch.ones(size=(1, self.config.num_classes, 1, 1)) *
+            torch.tensor(1 / self.config.num_classes),
             requires_grad=False,
         )
 
@@ -361,10 +365,12 @@ class Einet(nn.Module):
             # If class is given, use it as base index
             if class_index is not None:
                 if isinstance(class_index, list):
-                    indices = torch.tensor(class_index, device=self.__device).view(-1, 1)
+                    indices = torch.tensor(
+                        class_index, device=self.__device).view(-1, 1)
                     num_samples = indices.shape[0]
                 else:
-                    indices = torch.empty(size=(num_samples, 1), device=self.__device)
+                    indices = torch.empty(
+                        size=(num_samples, 1), device=self.__device)
                     indices.fill_(class_index)
 
                 # Create new sampling context
@@ -396,7 +402,8 @@ class Einet(nn.Module):
             if self.config.num_repetitions > 1:
                 indices_out_pre_root = ctx.indices_out
 
-                ctx.indices_repetition = torch.zeros(num_samples, dtype=int, device=self.__device)
+                ctx.indices_repetition = torch.zeros(
+                    num_samples, dtype=int, device=self.__device)
                 ctx = self.mixing.sample(context=ctx)
 
                 # Obtain repetition indices
@@ -415,7 +422,8 @@ class Einet(nn.Module):
                 evidence = evidence.clone()
                 shape_evidence = evidence.shape
                 evidence = evidence.view_as(samples)
-                evidence[:, :, marginalized_scopes] = samples[:, :, marginalized_scopes]
+                evidence[:, :, marginalized_scopes] = samples[:,
+                                                              :, marginalized_scopes]
                 evidence = evidence.view(shape_evidence)
                 return evidence
             else:
@@ -506,11 +514,13 @@ class Einet(nn.Module):
             if self.config.num_repetitions > 1:
                 indices_out_pre_root = ctx.indices_out
 
-                ctx.indices_repetition = torch.ones(num_samples, 1, dtype=torch.float, device=self.__device)
+                ctx.indices_repetition = torch.ones(
+                    num_samples, 1, dtype=torch.float, device=self.__device)
                 ctx = self.mixing.sample(context=ctx)
 
                 # Obtain repetition indices
-                ctx.indices_repetition = ctx.indices_out.view(num_samples, self.config.num_repetitions)
+                ctx.indices_repetition = ctx.indices_out.view(
+                    num_samples, self.config.num_repetitions)
                 ctx.indices_out = indices_out_pre_root
             else:
                 ctx.indices_repetition = torch.ones(
@@ -533,7 +543,8 @@ class Einet(nn.Module):
                 evidence = evidence.clone()
                 shape_evidence = evidence.shape
                 evidence = evidence.view_as(samples)
-                evidence[:, :, marginalized_scopes] = samples[:, :, marginalized_scopes]
+                evidence[:, :, marginalized_scopes] = samples[:,
+                                                              :, marginalized_scopes]
                 evidence = evidence.view(shape_evidence)
                 return evidence
             else:
@@ -546,7 +557,8 @@ class Einet(nn.Module):
 class EinetMixture(nn.Module):
     def __init__(self, n_components: int, einet_config: EinetConfig):
         super().__init__()
-        self.n_components = check_valid(n_components, expected_type=int, lower_bound=1)
+        self.n_components = check_valid(
+            n_components, expected_type=int, lower_bound=1)
         self.config = einet_config
 
         einets = []
@@ -555,22 +567,27 @@ class EinetMixture(nn.Module):
             einets.append(Einet(einet_config))
 
         self.einets: Sequence[Einet] = nn.ModuleList(einets)
-        self._kmeans = KMeans(n_clusters=self.n_components, mode="euclidean", verbose=1)
-        self.mixture_weights = nn.Parameter(torch.empty(n_components), requires_grad=False)
-        self.centroids = nn.Parameter(torch.empty(n_components, einet_config.num_features), requires_grad=False)
+        self._kmeans = KMeans(n_clusters=self.n_components,
+                              mode="euclidean", verbose=1)
+        self.mixture_weights = nn.Parameter(
+            torch.empty(n_components), requires_grad=False)
+        self.centroids = nn.Parameter(torch.empty(
+            n_components, einet_config.num_features), requires_grad=False)
 
     @torch.no_grad()
     def initialize(self, data: torch.Tensor):
         data = data.float()  # input has to be [n, d]
         self._kmeans.fit(data.view(data.shape[0], -1))
 
-        self.mixture_weights.data = self._kmeans.num_points_in_clusters / self._kmeans.num_points_in_clusters.sum()
+        self.mixture_weights.data = self._kmeans.num_points_in_clusters / \
+            self._kmeans.num_points_in_clusters.sum()
         self.centroids.data = self._kmeans.centroids
 
     def _predict_cluster(self, x, marginalized_scopes: List[int] = None):
         x = x.view(x.shape[0], -1)  # input needs to be [n, d]
         if marginalized_scopes is not None:
-            keep_idx = list(sorted([i for i in range(self.config.num_features) if i not in marginalized_scopes]))
+            keep_idx = list(sorted(
+                [i for i in range(self.config.num_features) if i not in marginalized_scopes]))
             centroids = self.centroids[:, keep_idx]
             x = x[:, keep_idx]
         else:
@@ -591,7 +608,8 @@ class EinetMixture(nn.Module):
     def forward(self, x, marginalized_scope: torch.Tensor = None):
         assert self._kmeans is not None, "EinetMixture has not been initialized yet."
 
-        separated_idxs, separated_data = self._separate_data_by_cluster(x, marginalized_scope)
+        separated_idxs, separated_data = self._separate_data_by_cluster(
+            x, marginalized_scope)
 
         lls_result = []
         data_idxs_all = []
@@ -641,11 +659,13 @@ class EinetMixture(nn.Module):
             cluster_idxs = [self.mixture_weights.argmax().item()]
         else:
             if num_samples_per_cluster is not None:
-                cluster_idxs = torch.arange(self.n_components).repeat_interleave(num_samples_per_cluster).tolist()
+                cluster_idxs = torch.arange(self.n_components).repeat_interleave(
+                    num_samples_per_cluster).tolist()
             else:
                 # Sample from categorical over weights
                 cluster_idxs = (
-                    torch.distributions.Categorical(probs=self.mixture_weights).sample((num_samples,)).tolist()
+                    torch.distributions.Categorical(
+                        probs=self.mixture_weights).sample((num_samples,)).tolist()
                 )
 
         if evidence is None:
@@ -670,7 +690,8 @@ class EinetMixture(nn.Module):
             samples = torch.cat(samples_all, dim=0)
         else:
             # Sample with evidence
-            separated_idxs, separated_data = self._separate_data_by_cluster(evidence, marginalized_scopes)
+            separated_idxs, separated_data = self._separate_data_by_cluster(
+                evidence, marginalized_scopes)
 
             samples_all = []
             evidence_idxs_all = []
@@ -690,10 +711,12 @@ class EinetMixture(nn.Module):
                     evidence_idxs_all.append(evidence_idx)
 
             # Sort results into original order as observed in the batch
-            L = [(evidence_idxs_all[i], i) for i in range(len(evidence_idxs_all))]
+            L = [(evidence_idxs_all[i], i)
+                 for i in range(len(evidence_idxs_all))]
             L.sort()
             _, permutation = zip(*L)
-            permutation = torch.tensor(permutation, device=evidence.device).view(-1)
+            permutation = torch.tensor(
+                permutation, device=evidence.device).view(-1)
             samples_all = torch.stack(samples_all)
             samples_sorted = samples_all[permutation]
             samples = samples_sorted
@@ -716,7 +739,6 @@ class EinetMixture(nn.Module):
         return self.sample(evidence=evidence, is_mpe=True, marginalized_scopes=marginalized_scopes)
 
 
-
 class CCLEinet(Einet):
     """
     Einet with class conditional data leaves.
@@ -735,18 +757,21 @@ class CCLEinet(Einet):
         """
         self.class_idx = class_idx
         self.num_classes = config.num_classes
-        config.leaf_kwargs = {
-            **config.leaf_kwargs,
-            "class_idx": class_idx,
-            "num_classes": self.num_classes}
-
+        if config.leaf_kwargs is not None:
+            config.leaf_kwargs = {
+                **config.leaf_kwargs,
+                "class_idx": class_idx,
+                "num_classes": self.num_classes}
+        else:
+            config.leaf_kwargs = {
+                "class_idx": class_idx,
+                "num_classes": self.num_classes}
 
         # setting number of classes to one because we only need one class conditional data dist.
         config.num_classes = 1
 
         # using build from parent but with different distribution creation
         super().__init__(config)
-
 
     def _build(self):
         """Construct the internal architecture of the RatSpn with class conditional leaves."""
@@ -804,10 +829,12 @@ class CCLEinet(Einet):
             einsum_layers.append(layer)
 
         # Construct leaf
-        self.leaf = self._build_input_distribution(num_features_out=einsum_layers[-1].num_features)
+        self.leaf = self._build_input_distribution(
+            num_features_out=einsum_layers[-1].num_features)
 
         # List layers in a bottom-to-top fashion
-        self.einsum_layers: Sequence[EinsumLayer] = nn.ModuleList(reversed(einsum_layers))
+        self.einsum_layers: Sequence[EinsumLayer] = nn.ModuleList(
+            reversed(einsum_layers))
 
         # If model has multiple reptitions, add repetition mixing layer
         if self.config.num_repetitions > 1:
@@ -818,8 +845,8 @@ class CCLEinet(Einet):
             )
 
         # Construct the categorical class distribution with repetitions
-        self._class_dist = CustomCategorical(self.num_classes, self.config.num_repetitions)
-
+        self._class_dist = CustomCategorical(
+            self.num_classes, self.config.num_repetitions)
 
     def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
         """
@@ -845,46 +872,48 @@ class CCLEinet(Einet):
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
 
-        
         if self.training:  # if in train -> do one upwards pass
-            x = self._one_class_forward(x, marginalization_mask=marginalization_mask, return_conditional=return_conditional)
+            x = self._one_class_forward(
+                x, marginalization_mask=marginalization_mask, return_conditional=return_conditional)
         else:  # if in eval -> do C upwards passes TODO: make this as a batch with artificial classes
             res = list()
             x_copy = x.clone()
             for i in range(self.num_classes):
-                x_copy[:,:, self.class_idx] = i
-                res.append(self._one_class_forward(x_copy, marginalization_mask=marginalization_mask, return_conditional=return_conditional))
+                x_copy[:, :, self.class_idx] = i
+                res.append(self._one_class_forward(
+                    x_copy, marginalization_mask=marginalization_mask, return_conditional=return_conditional))
             x = torch.stack(res).T.squeeze(0)
 
         return x
 
-
-    def _one_class_forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor=None, return_conditional=False) -> torch.Tensor:
+    def _one_class_forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, return_conditional=False) -> torch.Tensor:
         """
         Inference pass with one class. p(X, Y=y)
         """
 
         class_labels = (
-            x[:,:, self.class_idx] # get class
-                .to(torch.int64) # make index
-            )
+            x[:, :, self.class_idx]  # get class
+            .to(torch.int64)  # make index
+        )
 
-        
-        # Apply leaf distributions (replace marginalization indicators with 0.0 first) 
+        # Apply leaf distributions (replace marginalization indicators with 0.0 first)
         # TODO: how to signal that y can't be nan in training
         conditional_log_likelihood = self.leaf(x, marginalization_mask)
 
         # Pass through intermediate layers
-        conditional_log_likelihood = self._forward_layers(conditional_log_likelihood)
+        conditional_log_likelihood = self._forward_layers(
+            conditional_log_likelihood)
 
         if return_conditional:
             # set class conditionals two ones (zero in log space)
             class_log_likelihood = torch.zeros_like(conditional_log_likelihood)
         else:
             # add channel and feature dim to class probs
-            class_log_likelihood = self._class_dist(class_labels).unsqueeze(1).unsqueeze(1)
+            class_log_likelihood = self._class_dist(
+                class_labels).unsqueeze(1).unsqueeze(1)
 
-        joint_log_likelihod = conditional_log_likelihood.add(class_log_likelihood)
+        joint_log_likelihod = conditional_log_likelihood.add(
+            class_log_likelihood)
 
         # If model has multiple reptitions, perform repetition mixing
         if self.config.num_repetitions > 1:
@@ -902,7 +931,8 @@ class CCLEinet(Einet):
         joint_log_likelihod = joint_log_likelihod.squeeze(1)
 
         # Final shape check
-        assert joint_log_likelihod.shape == (batch_size, self.config.num_classes)
+        assert joint_log_likelihod.shape == (
+            batch_size, self.config.num_classes)
 
         return joint_log_likelihod
 
@@ -919,7 +949,6 @@ class CCLEinet(Einet):
     ):
         # TODO
         raise NotImplentedError("sampling is not implemented jet for CCLEinet")
-
 
     def mpe(
         self,
