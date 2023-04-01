@@ -40,6 +40,11 @@ def accuracy(model, X, y):
 def score_one_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class_idx=4, dropout=0.0, epochs=40, lr=0.2):
     """ returning lists with test acc, train acc and train loss """
 
+    X_train = train_data[:, :class_idx]
+    X_test = test_data[:, :class_idx]
+    y_train = train_data[:, class_idx].long()
+    y_test = test_data[:, class_idx].long()
+
     config = EinetConfig(
         num_features=4,
         num_channels=D,
@@ -49,7 +54,7 @@ def score_one_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class
         num_classes=num_classes,
         leaf_type=CCRatNormal,
         dropout=dropout)
-    model = CCLEinet(config, class_idx=class_idx).to(device)
+    model = CCLEinet(config).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -60,14 +65,14 @@ def score_one_cceinet(train_data, test_data, D=1, K=3, R=3, num_classes=3, class
     for epoch in range(epochs):
         optimizer.zero_grad()
 
-        outputs = model(train_data)
+        outputs = model(X_train, y_train)
         loss = -outputs.mean()
 
         loss.backward()
         optimizer.step()
 
         model.eval()
-        acc_test = accuracy(model, test_data, test_data[:, class_idx])
+        acc_test = accuracy(model, X_test, y_test)
         model.train()
 
         test_acc_list.append(acc_test.item())
