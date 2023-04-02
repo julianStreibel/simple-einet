@@ -207,6 +207,8 @@ def k_fold(
     if show:
         plt.show()
 
+    return einet_scores_mean.max(), cceinet_scores_mean.max()
+
 
 if __name__ == "__main__":
     # lr_cceinet = np.linspace(0.01, 1, 20)
@@ -216,21 +218,23 @@ if __name__ == "__main__":
     # plt.show()
 
     # best params for einet
-    k_fold(
+    einet_scores_mean_max, cceinet_scores_mean_max = k_fold(
         LR_EINET=1.4350907130085637,
         LR_CCEINET=1.4350907130085637,
         EPOCHS=100,
         K=7,
         R=6,
         K_FOLDS=5)
+    prrint("best einet", einet_scores_mean_max, cceinet_scores_mean_max)
 
     # best parrams for cceinet
-    k_fold(
+    einet_scores_mean_max, cceinet_scores_mean_max = k_fold(
         LR_EINET=0.99254923282291,
         LR_CCEINET=0.99254923282291,
         EPOCHS=100,
         K=7,
         R=1,
         K_FOLDS=5)
+    prrint("best cceinet", einet_scores_mean_max, cceinet_scores_mean_max)
 
     plt.show()

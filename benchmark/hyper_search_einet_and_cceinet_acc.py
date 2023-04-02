@@ -21,10 +21,13 @@ EPOCHS = 50
 TRIALS = 50
 CLASS_IDX = -1
 
-# IRIS = datasets.load_iris()
-# DATA = np.hstack((IRIS.data, np.expand_dims(IRIS.target, axis=1)))
-# NUM_FEATURES = 4
-# NUM_CLASSES = 3
+K_MIN = 1
+K_MAX = 7
+R_MIN = 1
+R_MAX = 7
+LR_MIN = 0.001
+LR_MAX = 1
+
 
 DIGITS = datasets.load_digits()
 DATA = np.hstack((DIGITS.data, np.expand_dims(DIGITS.target, axis=1)))
@@ -170,19 +173,19 @@ def score_cceinet(data, K=3, R=3, lr=0.07):
 
 
 def score_einet_proxy(trial):
-    K = trial.suggest_int("K", 1, 5)
-    R = trial.suggest_int("R", 1, 5)
-    lr = trial.suggest_float("lr", 0.0001, 1)
+    K = trial.suggest_int("K", K_MIN, K_MAX)
+    R = trial.suggest_int("R", R_MIN, R_MAX)
+    lr = trial.suggest_float("lr", LR_MIN, LR_MAX)
 
-    return score_einet(DATA, K, R, lr)
+    return score_einet(DATA, K=K, R=R, lr=lr)
 
 
 def score_cceinet_proxy(trial):
-    K = trial.suggest_int("K", 1, 5)
-    R = trial.suggest_int("R", 1, 5)
-    lr = trial.suggest_float("lr", 0.0001, 1)
+    K = trial.suggest_int("K", K_MIN, K_MAX)
+    R = trial.suggest_int("R", R_MIN, R_MAX)
+    lr = trial.suggest_float("lr", LR_MIN, LR_MAX)
 
-    return score_cceinet(DATA, K, R, lr)
+    return score_cceinet(DATA, K=K, R=R, lr=lr)
 
 
 if __name__ == "__main__":
@@ -198,7 +201,7 @@ if __name__ == "__main__":
     print("cceinet best params:", cceinet_study.best_params)
     print("cceinet best value:", cceinet_study.best_value)
 
-    # einet best params: {'K': 15, 'R': 19, 'lr': 0.05349491294870641}
-    # einet best value: 94.5066664276123
-    # cceinet best params: {'K': 18, 'R': 10, 'lr': 0.522016997420737}
-    # cceinet best value: 93.92666650390625
+# einet best params: {'K': 7, 'R': 7, 'lr': 0.8688466636300072}
+# einet best value: 70.17630146789551
+# cceinet best params: {'K': 7, 'R': 7, 'lr': 0.9441572949252982}
+# cceinet best value: 90.81250676727295

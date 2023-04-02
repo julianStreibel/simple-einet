@@ -24,8 +24,8 @@ K_MIN = 1
 K_MAX = 7
 R_MIN = 1
 R_MAX = 7
-LR_MIN = 0.0001
-LR_MAX = 2
+LR_MIN = 0.001
+LR_MAX = 1
 
 DIGITS = datasets.load_digits()
 DATA = np.hstack((DIGITS.data, np.expand_dims(DIGITS.target, axis=1)))
@@ -169,8 +169,9 @@ if __name__ == "__main__":
         cceinet_study.best_trial, in_eval=True))
 
     # digits
-    # einet best params: {'K': 5, 'R': 5, 'lr': 0.6243950653085186}
-    # einet best value: 1380553.9706985338
-    # einet eval: (tensor(63.9955), tensor(461.7160, grad_fn= < NllLossBackward0 >), 4500)
-    # cceinet best params: {'K': 3, 'R': 4, 'lr': 0.8555704838502659}
-    # cceinet eval: (tensor(96.1603), tensor(293.8214, grad_fn= < NegBackward0 >), 15444)
+    # einet best params: {'K': 7, 'R': 6, 'lr': 1.4350907130085637}
+    # einet best value: 1309129.3460619296
+    # einet eval: (tensor(79.2988), tensor(393.7412, grad_fn=<NllLossBackward0>), 8376)
+    # cceinet best params: {'K': 7, 'R': 1, 'lr': 0.99254923282291}
+    # cceinet best value: 1067786.1432766588
+    # cceinet eval: (tensor(97.1063), tensor(293.1933, grad_fn=<NegBackward0>), 9020)
