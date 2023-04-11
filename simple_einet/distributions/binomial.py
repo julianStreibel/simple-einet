@@ -200,7 +200,8 @@ class CCBinomial(AbstractLeaf):
 
         # Create binomial parameters
         self._offset = torch.tensor(5.) if weight_decay else torch.tensor(0.)
-        self.p = nn.Parameter(torch.randn(num_channels, num_features, num_leaves, num_repetitions, num_classes) + self._offset)
+        init_params = torch.randn(num_channels, num_features, num_leaves, num_repetitions, 1) + self._offset
+        self.p = nn.Parameter(init_params.expand(-1, -1, -1, -1, num_classes))
 
     @property
     def probs(self):

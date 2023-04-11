@@ -10,6 +10,7 @@ from torch import nn
 
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_, CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
+from simple_einet.invertable_shuffle_layer import InvertableFeatureShuffleLayer
 from simple_einet.factorized_leaf_layer import FactorizedLeaf, CCLFactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
@@ -837,6 +838,9 @@ class CCLEinet(Einet):
 
             einsum_layers.append(layer)
 
+        # invertable featuer shuffle layer
+        self._inv_suffle = InvertableFeatureShuffleLayer()
+
         # Construct leaf
         self.leaf = self._build_input_distribution(
             num_features_out=einsum_layers[-1].num_features)
@@ -890,6 +894,7 @@ class CCLEinet(Einet):
         if x.dim() == 4:  # [N, C, H, W]
             x = x.view(x.shape[0], self.config.num_channels, -1)
 
+        x = self._inv_suffle(x)
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
 
@@ -997,6 +1002,7 @@ class CCLEinet(Einet):
          # Check if evidence contains nans
         if evidence is not None:
             # Set n to the number of samples in the evidence
+            evidence = self._inv_suffle(evidence)
             num_samples = evidence.shape[0]
         elif num_samples is None:
             num_samples = 1
@@ -1059,8 +1065,10 @@ class CCLEinet(Einet):
                 evidence[:, :, marginalized_scopes] = samples[:,
                                                               :, marginalized_scopes]
                 evidence = evidence.view(shape_evidence)
+                evidence = self._inv_suffle.inv(evidence)
                 return evidence
             else:
+                samples = self._inv_suffle.inv(samples)
                 return samples
 
 

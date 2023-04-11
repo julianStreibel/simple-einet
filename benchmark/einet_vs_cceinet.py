@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 SEED = 1
 SHOW_LOSS = False
 
-device = torch.device("cpu")
+device = torch.device("cuda")
 torch.manual_seed(SEED)
 
 
@@ -225,7 +225,7 @@ if __name__ == "__main__":
         K=7,
         R=6,
         K_FOLDS=5)
-    prrint("best einet", einet_scores_mean_max, cceinet_scores_mean_max)
+    print("best einet", einet_scores_mean_max, cceinet_scores_mean_max)
 
     # best parrams for cceinet
     einet_scores_mean_max, cceinet_scores_mean_max = k_fold(
@@ -235,6 +235,6 @@ if __name__ == "__main__":
         K=7,
         R=1,
         K_FOLDS=5)
-    prrint("best cceinet", einet_scores_mean_max, cceinet_scores_mean_max)
+    print("best cceinet", einet_scores_mean_max, cceinet_scores_mean_max)
 
     plt.show()
