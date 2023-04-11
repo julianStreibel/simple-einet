@@ -44,7 +44,7 @@ def dist_forward(distribution, x: torch.Tensor, y: torch.Tensor = None):
     return x
 
 
-def dist_mode(distribution: dist.Distribution, context: SamplingContext = None) -> torch.Tensor:
+def dist_mode(distribution: dist.Distribution, context: SamplingContext = None, y: torch.Tensor = None) -> torch.Tensor:
     """
     Get the mode of a given distribution.
 
@@ -58,8 +58,8 @@ def dist_mode(distribution: dist.Distribution, context: SamplingContext = None) 
     if isinstance(distribution, dist.Normal):
         # Repeat the mode along the batch axis
         return distribution.mean.repeat(context.num_samples, 1, 1, 1, 1)
-    from simple_einet.distributions.normal import CustomNormal
-    from simple_einet.distributions.binomial import CustomBinomial
+    from simple_einet.distributions.normal import CustomNormal, CustomCCNormal
+    from simple_einet.distributions.binomial import CustomBinomial, CustomCCBinomial
 
     if isinstance(distribution, CustomNormal):
         # Repeat the mode along the batch axis
@@ -77,13 +77,19 @@ def dist_mode(distribution: dist.Distribution, context: SamplingContext = None) 
             return mode.repeat(context.num_samples, 1, 1, 1, 1)
         else:
             return mode
-
+    elif type(distribution) == CustomCCNormal and y is not None:
+        return distribution.mu[..., y].permute(4, 0, 1, 2, 3)
+    elif isinstance(distribution, CustomCCBinomial) and y is not None:
+        mode = distribution.probs[..., y].permute(4, 0, 1, 2, 3).clone()
+        total_count = distribution.total_count
+        mode = torch.floor(mode * (total_count + 1))
+        return mode
     else:
         raise Exception(
             f"MPE not yet implemented for type {type(distribution)}")
 
 
-def dist_sample(distribution: dist.Distribution, context: SamplingContext = None) -> torch.Tensor:
+def dist_sample(distribution: dist.Distribution, context: SamplingContext = None, y: torch.Tensor = None) -> torch.Tensor:
     """
     Sample n samples from a given distribution.
 
@@ -95,10 +101,11 @@ def dist_sample(distribution: dist.Distribution, context: SamplingContext = None
 
     # Sample from the specified distribution
     if context.is_mpe or context.mpe_at_leaves:
-        samples = dist_mode(distribution, context)
+        samples = dist_mode(distribution, context, y)
         samples = samples.unsqueeze(1)
     else:
-        from simple_einet.distributions import CustomNormal
+        from simple_einet.distributions import CustomNormal, CustomCCNormal, CustomCategorical
+        from simple_einet.distributions.binomial import CustomCCBinomial
 
         if type(distribution) == dist.Normal:
             distribution = dist.Normal(
@@ -106,8 +113,24 @@ def dist_sample(distribution: dist.Distribution, context: SamplingContext = None
         elif type(distribution) == CustomNormal:
             distribution = CustomNormal(
                 mu=distribution.mu, sigma=distribution.sigma * context.temperature_leaves)
-        samples = distribution.sample(sample_shape=(context.num_samples,))
-
+        
+        # class conditional distributions dont sample individual samples but treat a batch as a sample
+        # this is beacause the parameters are expendet to the batch size with the wanted leave params dep. on y
+        if type(distribution) == CustomCCNormal and y is not None:
+            mu = distribution.mu[..., y].permute(4, 0, 1, 2, 3)
+            sigma = distribution.sigma[..., y].permute(4, 0, 1, 2, 3)
+            distribution = CustomCCNormal(
+                mu, sigma * context.temperature_leaves)
+            samples = distribution.sample()
+            samples = samples.unsqueeze(1) # for compatibility
+        elif isinstance(distribution, CustomCCBinomial) and y is not None:
+            probs = distribution.probs[..., y].permute(4, 0, 1, 2, 3).clone()
+            distribution = dist.Binomial(probs=probs, total_count=distribution.total_count)
+            samples = distribution.sample()
+            samples = samples.unsqueeze(1) # for compatibility
+        else:
+            samples = distribution.sample(sample_shape=(context.num_samples,))
+            
     assert (
         samples.shape[1] == 1
     ), "Something went wrong. First sample size dimension should be size 1 due to the distribution parameter dimensions. Please report this issue."

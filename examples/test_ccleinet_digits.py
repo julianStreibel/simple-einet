@@ -20,7 +20,7 @@ parser.add_argument(
 parser.add_argument(
     "--epochs",
     type=int,
-    default=14,
+    default=50,
     metavar="N",
     help="number of epochs to train (default: 14)",
 )
@@ -50,7 +50,7 @@ parser.add_argument("--dropout", type=float, default=0.0)
 
 args = parser.parse_args()
 
-device = torch.device("cpu")
+device = torch.device(args.device)
 torch.manual_seed(args.seed)
 
 config = EinetConfig(
@@ -78,8 +78,6 @@ X_train = torch.tensor(X_train).float().to(device)
 y_train = torch.tensor(y_train).long().to(device)
 X_test = torch.tensor(X_test).float().to(device)
 y_test = torch.tensor(y_test).long().to(device)
-
-# breakpoint()
 
 train_conditional = False
 test_conditional = False

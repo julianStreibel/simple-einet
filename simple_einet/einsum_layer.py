@@ -359,6 +359,7 @@ class EinsumLayer(AbstractLayer):
             dropout_indices = self._bernoulli_dist.sample(x.shape).bool()
             x[dropout_indices] = np.NINF
 
+
         # Dimensions
         N, D, C, R = x.size()
         D_out = D // 2
@@ -387,6 +388,7 @@ class EinsumLayer(AbstractLayer):
 
         # LogEinsumExp trick, re-add the max
         prob = torch.log(prob) + left_max + right_max
+
 
         # Save input if input cache is enabled
         if self._is_input_cache_enabled:
@@ -545,10 +547,11 @@ class EinsumLayer(AbstractLayer):
         self._input_cache_right = None
 
     def extra_repr(self):
-        return "num_features={}, num_sums_in={}, num_sums_out={}, out_shape={}, " "weights_shape={}".format(
+        return "num_features={}, num_sums_in={}, num_sums_out={}, num_repetitions={}, out_shape={}, " "weights_shape={}".format(
             self.num_features,
             self.num_sums_in,
             self.num_sums_out,
+            self.num_repetitions,
             self.out_shape,
             self.weights.shape,
         )
@@ -681,6 +684,6 @@ class EinsumMixingLayer(AbstractLayer):
                 context.num_samples, dtype=torch.int, device=self.__device)
 
     def extra_repr(self):
-        return "num_features={}, num_sums_in={}, num_sums_out={}".format(
+        return "num_features={}, num_sums_in={}, num_sums_out={}, num_repetitions={}".format(
             self.num_features, self.num_sums_in, self.num_sums_out, self.num_repetitions
         )

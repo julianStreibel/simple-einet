@@ -145,5 +145,6 @@ wandb/
 
 einet/
 outputs/
+CCLEinet/
 
 *.DS_Store

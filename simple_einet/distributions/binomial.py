@@ -175,3 +175,71 @@ class ConditionalBinomial(AbstractLeaf):
 
     def _get_base_distribution(self) -> dist.Distribution:
         raise NotImplementedError("This should not happen.")
+
+
+
+class CCBinomial(AbstractLeaf):
+    def __init__(
+        self,
+        num_features: int,
+        num_channels: int,
+        num_leaves: int,
+        num_repetitions: int,
+        total_count: int,
+        num_classes: int,
+        weight_decay=False
+    ):
+        super().__init__(
+            num_features=num_features,
+            num_channels=num_channels,
+            num_leaves=num_leaves,
+            num_repetitions=num_repetitions,
+        )
+        self.num_classes = num_classes
+        self.total_count = check_valid(total_count, int, lower_bound=1)
+
+        # Create binomial parameters
+        self._offset = torch.tensor(5.) if weight_decay else torch.tensor(0.)
+        self.p = nn.Parameter(torch.randn(num_channels, num_features, num_leaves, num_repetitions, num_classes) + self._offset)
+
+    @property
+    def probs(self):
+        return self.p - self._offset
+
+    def _get_base_distribution(self, y, context: SamplingContext = None):
+        # Use sigmoid to ensure, that probs are in valid range
+        if context is not None and context.is_differentiable:
+            raise NotImplementedError("differentiable CCBinomial not implemented jet.")
+        else:
+            return CustomCCBinomial(probs=self.probs.sigmoid(), total_count=self.total_count)
+
+    def forward(self, x, y, marginalized_scopes: List[int]):
+        # Forward through base distribution
+        d = self._get_base_distribution(y)
+        x = dist_forward(d, x, y)
+
+        x = self._marginalize_input(x, marginalized_scopes)
+
+        return x
+
+    def sample(self, y: torch.Tensor, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:
+        """
+        Perform sampling, given indices from the parent layer that indicate which of the multiple representations
+        for each input shall be used.
+        """
+        d = self._get_base_distribution(y)
+        samples = dist_sample(distribution=d, context=context, y=y)
+        return samples
+
+    def extra_repr(self):
+        return f"num_features={self.num_features}, num_leaves={self.num_leaves}, num_classes={self.num_classes}, out_shape={self.out_shape}"
+
+
+class CustomCCBinomial:
+    def __init__(self, probs, total_count):
+        self.probs = probs
+        self.total_count = total_count
+
+    def log_prob(self, x, y):
+        probs = self.probs[..., y].permute(4, 0, 1, 2, 3)
+        return dist.Binomial(probs=probs, total_count=self.total_count).log_prob(x)

@@ -24,7 +24,7 @@ from pytorch_lightning import seed_everything
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from simple_einet.data import build_dataloader
-from simple_einet.einet import EinetConfig, Einet
+from simple_einet.einet import EinetConfig, Einet, CCLEinet
 from simple_einet.distributions.binomial import Binomial
 
 
@@ -32,7 +32,7 @@ from simple_einet.distributions.binomial import Binomial
 DATALOADER_ID_TO_SET_NAME = {0: "train", 1: "val", 2: "test"}
 
 
-def make_einet(cfg, num_classes: int = 1):
+def make_einet(cfg, num_classes: int = 1, class_conditional_leaves=False):
     """
     Make an EinsumNetworks model based off the given arguments.
 
@@ -44,9 +44,7 @@ def make_einet(cfg, num_classes: int = 1):
     """
     image_shape = get_data_shape(cfg.dataset)
     # leaf_kwargs, leaf_type = {"total_count": 255}, Binomial
-    leaf_kwargs, leaf_type = get_distribution(
-        dist=cfg.dist, min_sigma=cfg.min_sigma, max_sigma=cfg.max_sigma
-    )
+    leaf_kwargs, leaf_type = get_distribution(**cfg)
 
     config = EinetConfig(
         num_features=image_shape.num_pixels,
@@ -62,7 +60,9 @@ def make_einet(cfg, num_classes: int = 1):
         cross_product=cfg.cp,
         log_weights=cfg.log_weights,
     )
-    return Einet(config)
+    return Einet(config) if not class_conditional_leaves else CCLEinet(config)
+
+
 
 
 class LitModel(pl.LightningModule, ABC):
@@ -78,7 +78,7 @@ class LitModel(pl.LightningModule, ABC):
         self.save_hyperparameters()
 
     def preprocess(self, data: torch.Tensor):
-        if self.cfg.dist == Dist.BINOMIAL:
+        if self.cfg.dist == Dist.BINOMIAL or self.cfg.dist == Dist.CCLBINOMIAL:
             data *= 255.0
 
         return data
@@ -220,3 +220,113 @@ class SpnDiscriminative(LitModel):
         loss = self.criterion(ll_y_g_x, labels)
         accuracy = (labels == ll_y_g_x.argmax(-1)).sum() / ll_y_g_x.shape[0]
         return loss, accuracy
+
+
+class SpnCCLEinet(LitModel):
+    """
+    Class Conditional Leaf SPN model.
+    """
+
+    def __init__(self, cfg: DictConfig):
+        super().__init__(cfg, name="")
+
+        # Construct SPN
+        self.spn = make_einet(cfg, num_classes=10, class_conditional_leaves=True)
+        self.cfg = cfg
+        if cfg.classification:
+            # Define loss function
+            self.criterion = nn.NLLLoss()
+
+    def training_step(self, train_batch, batch_idx):
+        loss = self._get_loss(train_batch)
+        self.log("Train/loss", loss)
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        loss, accuracy = self._get_loss(val_batch), self._get_accuracy(val_batch, prep=False)
+        self.log("Val/accuracy", accuracy, prog_bar=True)
+        self.log("Val/loss", loss, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx, dataloader_id=0):
+        accuracy = self._get_accuracy(batch)
+        set_name = DATALOADER_ID_TO_SET_NAME[dataloader_id]
+        self.log(f"Test/{set_name}_accuracy", accuracy, add_dataloader_idx=False)
+
+    def _get_loss(self, batch) -> torch.Tensor:
+        data, labels = batch
+        data = self.preprocess(data)
+        if self.cfg.classification:
+            joints = self.spn(data)
+            data_marginial = torch.logsumexp(joints, 1).reshape(-1, 1)
+            data_conditional = joints - data_marginial
+            return self.criterion(data_conditional, labels)
+        else:
+            return - self.spn(data, labels).mean()  # [N, 1]
+
+        return - joint.mean()
+
+    def _get_accuracy(self, batch, prep=True) -> torch.Tensor:
+        data, labels = batch
+        if prep:
+            data = self.preprocess(data)
+        # logp(x, y)
+        ll = self.spn(data)  # [N, C]
+
+        return (labels == ll.argmax(-1)).sum() / ll.shape[0]
+
+
+    def on_train_epoch_end(self):
+        self.optimizers().param_groups[-1]["weight_decay"] *= self.cfg.weight_decay_decay
+        if not self.cfg.classification:
+            with torch.no_grad():
+                samples = self.generate_samples(num_samples=100, class_index=list(range(10)) * 10, mpe_at_leaves=True)
+                grid = torchvision.utils.make_grid(
+                    samples.data[:100], nrow=10, pad_value=0.0, normalize=True
+                )
+                self.logger.log_image(key="samples mpe at leaves", images=[grid])
+
+                samples = self.generate_samples(num_samples=100, class_index=list(range(10)) * 10)
+                grid = torchvision.utils.make_grid(
+                    samples.data[:100], nrow=10, pad_value=0.0, normalize=True
+                )
+                self.logger.log_image(key="samples no mpe at leaves", images=[grid])
+
+        super().on_train_epoch_end()
+
+
+    def generate_samples(self, num_samples: int, class_index=None, mpe_at_leaves=False):
+        samples = self.spn.sample(
+                num_samples=num_samples, 
+                mpe_at_leaves=mpe_at_leaves,
+                class_index=class_index
+            ).view(
+            -1, *self.image_shape
+        )
+        samples = samples / 255.0
+        return samples
+
+    def configure_optimizers(self):
+
+        # different lr
+        # optimizer = torch.optim.Adam([
+        #     {"params": self.spn.einsum_layers.parameters()},
+        #     {"params": self.spn._class_dist.parameters()},
+        #     {"params": self.spn._joint_layer.parameters()},
+        #     {"params": self.spn.leaf.parameters(), "lr": self.cfg.lr}
+        #     ], lr=self.cfg.lr / 100)
+
+        # weight decay on p of binomials 
+        optimizer = torch.optim.Adam([
+            {"params": self.spn.einsum_layers.parameters()},
+            {"params": self.spn._class_dist.parameters()},
+            {"params": self.spn._joint_layer.parameters()},
+            {"params": self.spn.leaf.parameters(), "weight_decay": self.cfg.weight_decay} 
+            ], lr=self.cfg.lr)
+
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=[int(0.7 * self.cfg.epochs), int(0.9 * self.cfg.epochs)],
+            gamma=0.1,
+        )
+        return [optimizer], [lr_scheduler]

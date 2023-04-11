@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import torch
-from simple_einet.distributions.abstract_leaf import AbstractLeaf, dist_forward
+from simple_einet.distributions.abstract_leaf import AbstractLeaf, dist_forward, dist_sample
 from simple_einet.type_checks import check_valid
 from torch import distributions as dist
 from torch import nn
@@ -194,7 +194,7 @@ class CCRatNormal(AbstractLeaf):
             means = torch.sigmoid(self.means) * mean_range + self.min_mean
 
         # d = dist.Normal(means, sigma)
-        d = CustomCCNormal(means, sigma, self.num_classes)
+        d = CustomCCNormal(means, sigma)
         return d
 
     def forward(self, x, y, marginalized_scopes: List[int]):
@@ -206,29 +206,37 @@ class CCRatNormal(AbstractLeaf):
 
         return x
 
+    def sample(self, y: torch.Tensor, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:
+        """
+        Perform sampling, given indices from the parent layer that indicate which of the multiple representations
+        for each input shall be used.
+        """
+        d = self._get_base_distribution()
+        samples = dist_sample(distribution=d, context=context, y=y)
+        return samples
+
+    def extra_repr(self):
+        return f"num_features={self.num_features}, num_leaves={self.num_leaves}, num_classes={self.num_classes}, out_shape={self.out_shape}"
+
 
 class CustomCCNormal:
     """ Class Conditioned Normal class """
 
-    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor, num_classes: int):
+    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor):
         self.mu = mu
         self.sigma = sigma
-        self.num_classes = num_classes
 
-    def sample(self, sample_shape: Tuple[int]):
-        # num_samples = sample_shape[0]
-        # eps = torch.randn((num_samples,) + self.mu.shape, dtype=self.mu.dtype, device=self.mu.device)
-        # samples = self.mu.unsqueeze(0) + self.sigma.unsqueeze(0) * eps
-        # return samples
-        raise NotImplementedError(
-            "Sampling in CustomCCNormal not implemented jet.")
+    def sample(self):
+        eps = torch.randn(self.mu.shape, dtype=self.mu.dtype, device=self.mu.device)
+        samples = self.mu + self.sigma * eps
+        return samples
+
 
     def log_prob(self, x, y):
 
         # taking mu and sigma for the right class
         mu = self.mu[..., y].permute(4, 0, 1, 2, 3)
         sigma = self.sigma[..., y].permute(4, 0, 1, 2, 3)
-
         log_class_conditional_likelihood = dist.Normal(
             mu, sigma).log_prob(x)
 

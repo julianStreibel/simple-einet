@@ -17,8 +17,8 @@ from torch.utils.data.sampler import Sampler
 from torchvision.datasets import CIFAR10, MNIST, SVHN, CelebA, FashionMNIST, LSUN
 from torchvision.transforms.functional import InterpolationMode
 
-from simple_einet.distributions import RatNormal
-from simple_einet.distributions.binomial import Binomial
+from simple_einet.distributions import RatNormal, CCRatNormal
+from simple_einet.distributions.binomial import Binomial, CCBinomial
 
 
 @dataclass
@@ -358,9 +358,11 @@ class Dist(str, Enum):
 
     NORMAL = "normal"
     BINOMIAL = "binomial"
+    CCLNORMAL = "cclnormal"
+    CCLBINOMIAL = "cclbinomail"
 
 
-def get_distribution(dist, min_sigma, max_sigma):
+def get_distribution(**cfg):
     """
     Get the distribution for the leaves.
 
@@ -374,12 +376,19 @@ def get_distribution(dist, min_sigma, max_sigma):
         leaf_kwargs: The kwargs for the leaves.
 
     """
-    if dist == Dist.NORMAL:
+    
+    if cfg["dist"] == Dist.NORMAL:
         leaf_type = RatNormal
-        leaf_kwargs = {"min_sigma": min_sigma, "max_sigma": max_sigma}
-    elif dist == Dist.BINOMIAL:
+        leaf_kwargs = {"min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
+    elif cfg["dist"] == Dist.BINOMIAL:
         leaf_type = Binomial
         leaf_kwargs = {"total_count": 2**8 - 1}
+    elif cfg["dist"] == Dist.CCLNORMAL:
+        leaf_type = CCRatNormal
+        leaf_kwargs = {"min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
+    elif cfg["dist"] == Dist.CCLBINOMIAL:
+        leaf_type = CCBinomial
+        leaf_kwargs = {"total_count": 2**8 - 1, "weight_decay": cfg["weight_decay"] > 0}
     else:
-        raise ValueError("dist must be either normal or binomial")
+        raise ValueError("dist must be either normal, cclnormal or binomial")
     return leaf_kwargs, leaf_type

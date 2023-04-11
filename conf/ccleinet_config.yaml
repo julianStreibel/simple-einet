@@ -1,8 +1,8 @@
 defaults:
   - _self_
   - experiment: null
-  # - override hydra/job_logging: colorlog
-  # - override hydra/hydra_logging: colorlog
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: tpe
 
 # Default set of configurations.
 data_dir: ???
@@ -27,16 +27,30 @@ I: 10
 D: 3
 R: 1
 gpu: 0
-epochs: 10
+epochs: 20
 load_and_eval: False
-cp: False
-dist: "binomial"
+cp: True
+dist: "cclbinomial"
 precision: 16
 group_tag: ???
 tag: ???
-wandb: False
+wandb: True
 swa: False
 profiler: ???
 log_weights: False
-dataset: ???
+dataset: mnist
 num_classes: 10
+weight_decay: 0
+weight_decay_decay: 1
+
+
+
+hydra:
+  sweeper:
+    sampler:
+      seed: 234
+    direction: maximize
+    study_name: pendulum_ddpg
+    storage: null
+    n_trials: 20
+    n_jobs: 1
