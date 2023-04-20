@@ -9,8 +9,8 @@ from fast_pytorch_kmeans import KMeans
 from torch import nn
 
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_, CustomCategorical
-from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
-from simple_einet.invertable_shuffle_layer import InvertableFeatureShuffleLayer
+from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights, InterwovenEinsumLayer
+from simple_einet.invertable_shuffle_layer import InvertableShuffleLayer, ShufflePerRepetitionLayer
 from simple_einet.factorized_leaf_layer import FactorizedLeaf, CCLFactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
@@ -121,7 +121,6 @@ class Einet(nn.Module):
         Returns:
             Log-likelihood tensor of the input: p(X) or p(X | C) if number of classes > 1.
         """
-
         # Add channel dimension if not present
         if x.dim() == 2:  # [N, D]
             x = x.unsqueeze(1)
@@ -423,8 +422,7 @@ class Einet(nn.Module):
                 evidence = evidence.clone()
                 shape_evidence = evidence.shape
                 evidence = evidence.view_as(samples)
-                evidence[:, :, marginalized_scopes] = samples[:,
-                                                              :, marginalized_scopes]
+                evidence[:,:, marginalized_scopes] = samples[:,:, marginalized_scopes]
                 evidence = evidence.view(shape_evidence)
                 return evidence
             else:
@@ -809,37 +807,19 @@ class CCLEinet(Einet):
 
             in_features = 2**i
 
-            if self.config.cross_product:
-                layer = EinsumLayer(
-                    num_features=in_features,
-                    num_sums_in=_num_sums_in,
-                    num_sums_out=self.config.num_sums,
-                    num_repetitions=self.config.num_repetitions,
-                    dropout=self.config.dropout,
-                )
-            else:
-                if self.config.log_weights:
-                    layer = LinsumLayerLogWeights(
-                        num_features=in_features,
-                        num_sums_in=_num_sums_in,
-                        num_sums_out=self.config.num_sums,
-                        num_repetitions=self.config.num_repetitions,
-                        dropout=self.config.dropout,
-                    )
-
-                else:
-                    layer = LinsumLayer(
-                        num_features=in_features,
-                        num_sums_in=_num_sums_in,
-                        num_sums_out=self.config.num_sums,
-                        num_repetitions=self.config.num_repetitions,
-                        dropout=self.config.dropout,
-                    )
-
+            layer = InterwovenEinsumLayer(
+                num_features=in_features,
+                num_sums_in=_num_sums_in,
+                num_sums_out=self.config.num_sums,
+                num_repetitions=self.config.num_repetitions,
+                dropout=self.config.dropout,
+            )
+           
             einsum_layers.append(layer)
 
         # invertable featuer shuffle layer
-        self._inv_suffle = InvertableFeatureShuffleLayer()
+        self._inv_suffle = InvertableShuffleLayer()
+        # self._rep_shuffle = ShufflePerRepetitionLayer(self.config.num_repetitions, )
 
         # Construct leaf
         self.leaf = self._build_input_distribution(
@@ -897,6 +877,9 @@ class CCLEinet(Einet):
         x = self._inv_suffle(x)
         assert x.dim() == 3
         assert x.shape[1] == self.config.num_channels
+
+        # permute 
+        # x = self._rep_shuffle(x)
 
         if y is not None:  # if in train -> do one upwards pass
             x = self._one_class_forward(

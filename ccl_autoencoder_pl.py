@@ -18,14 +18,14 @@ from exp_utils import (
     load_from_checkpoint,
     plot_distribution,
 )
-from models_pl import SpnCCLEinet
+from models_pl import Lit_AutoCCLSPN
 from simple_einet.data import Dist
 from simple_einet.data import build_dataloader
 
 # A logger for this file
 logger = logging.getLogger(__name__)
 
-@hydra.main(version_base=None, config_path="./conf", config_name="ccleinet_config")
+@hydra.main(version_base=None, config_path="./conf", config_name="ccl_autoencoder_config")
 def main(cfg: DictConfig):
     preprocess_cfg(cfg)
 
@@ -37,14 +37,6 @@ def main(cfg: DictConfig):
 
     if not cfg.wandb:
         os.environ["WANDB_MODE"] = "offline"
-    
-    # Create dataloader
-    normalize = cfg.dist == Dist.NORMAL
-    train_loader, val_loader, test_loader = build_dataloader(
-        cfg=cfg, loop=False, normalize=normalize
-    )
-
-    cfg.num_steps_per_epoch = len(train_loader)
 
     # Load or create model
     if cfg.load_and_eval:
@@ -52,15 +44,19 @@ def main(cfg: DictConfig):
             results_dir, load_fn=SpnCCLEinet.load_from_checkpoint, cfg=cfg
         )
     else:
-        model = SpnCCLEinet(cfg)
+        model = Lit_AutoCCLSPN(cfg)
 
     seed_everything(cfg.seed, workers=True)
 
     print("Training model...")
-
+    # Create dataloader
+    normalize = cfg.dist == Dist.NORMAL
+    train_loader, val_loader, test_loader = build_dataloader(
+        cfg=cfg, loop=False, normalize=normalize
+    )
 
     # Create callbacks
-    logger_wandb = WandbLogger(name=cfg.tag, project="CCLEinet", group=cfg.group_tag,
+    logger_wandb = WandbLogger(name=cfg.tag, project="Auto_Einet", group=cfg.group_tag,
                                offline=not cfg.wandb)
 
     # Store number of model parameters
@@ -73,10 +69,10 @@ def main(cfg: DictConfig):
         "trainable_parameters"
     ] = summary.trainable_parameters
     logger_wandb.experiment.config["trainable_parameters_leaf"] = summary.param_nums[
-        summary.layer_names.index("spn.leaf")
+        summary.layer_names.index("auto_spn.spn.leaf")
     ]
     logger_wandb.experiment.config["trainable_parameters_sums"] = summary.param_nums[
-        summary.layer_names.index("spn.einsum_layers")
+        summary.layer_names.index("auto_spn.spn.einsum_layers")
     ]
 
     # Setup devices
@@ -101,6 +97,8 @@ def main(cfg: DictConfig):
     # Enable rich progress bar
     callbacks.append(RichProgressBar())
 
+    # train encoder and spn
+
     # Create trainer
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
@@ -122,18 +120,16 @@ def main(cfg: DictConfig):
 
     print("Evaluating model...")
 
-    if "synth" in cfg.dataset and not cfg.classification:
-        plot_distribution(
-            model=model.spn, dataset_name=cfg.dataset, logger_wandb=logger_wandb
-        )
-
     # Evaluate spn reconstruction error
     test_res = trainer.test(
         model=model, dataloaders=[train_loader, val_loader, test_loader], verbose=True
     )
 
+
     print("Finished evaluation...")
     return test_res[2]["Test/test_accuracy"]
+
+
 
 def preprocess_cfg(cfg: DictConfig):
     """

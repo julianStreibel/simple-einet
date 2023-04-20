@@ -232,7 +232,6 @@ class AbstractLeaf(AbstractLayer, ABC):
         # Forward through base distribution
         d = self._get_base_distribution()
         x = dist_forward(d, x)
-
         x = self._marginalize_input(x, marginalized_scopes)
 
         return x
