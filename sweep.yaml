@@ -5,15 +5,15 @@ metric:
   name: Val/accuracy
 parameters:
   batch_size:
-    max: 500
+    max: 150
     min: 10
     distribution: int_uniform
   lr:
-    max: 0.05
+    max: 0.01
     min: 0.00001
     distribution: uniform
   S:
-    max: 15
+    max: 20
     min: 2
     distribution: int_uniform
   R:
@@ -21,13 +21,17 @@ parameters:
     min: 2
     distribution: int_uniform
   I:
-    max: 10
-    min: 1
+    max: 20
+    min: 6
     distribution: int_uniform
   D:
     max: 10
     min: 3
     distribution: int_uniform
+  leaf_dropout:
+    max: 0.5
+    min: 0.0
+    distribution: uniform
 command:
   - ${env}
   - python

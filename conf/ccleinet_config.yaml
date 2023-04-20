@@ -43,3 +43,4 @@ num_classes: 10
 weight_decay: 0
 weight_decay_decay: 1
 num_steps_per_epoch: None
+leaf_dropout: 0
