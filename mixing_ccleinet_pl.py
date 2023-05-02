@@ -15,48 +15,53 @@ from pytorch_lightning.utilities.model_summary import (
 
 from exp_utils import (
     setup_experiment,
-    load_from_checkpoint,
+    load_from_checkpoint_cc,
     plot_distribution,
 )
-from models_pl import Lit_AutoCCLSPN
+from models_pl import SpnMixingCCLEinet
 from simple_einet.data import Dist
 from simple_einet.data import build_dataloader
 
 # A logger for this file
 logger = logging.getLogger(__name__)
 
-@hydra.main(version_base=None, config_path="./conf", config_name="ccl_autoencoder_config")
+
+@hydra.main(version_base=None, config_path="./conf", config_name="mixing_ccleinet_config")
 def main(cfg: DictConfig):
     preprocess_cfg(cfg)
 
     logger.info(OmegaConf.to_yaml(cfg))
 
-    results_dir, cfg = setup_experiment(name="simple-einet", cfg=cfg, remove_if_exists=True)
+    results_dir, cfg = setup_experiment(
+        name="simple-einet", cfg=cfg, remove_if_exists=True)
 
     seed_everything(cfg.seed, workers=True)
 
     if not cfg.wandb:
         os.environ["WANDB_MODE"] = "offline"
 
-    # Load or create model
-    if cfg.load_and_eval:
-        model = load_from_checkpoint(
-            results_dir, load_fn=Lit_AutoCCLSPN.load_from_checkpoint, cfg=cfg
-        )
-    else:
-        model = Lit_AutoCCLSPN(cfg)
-
-    seed_everything(cfg.seed, workers=True)
-
-    print("Training model...")
     # Create dataloader
     normalize = cfg.dist == Dist.NORMAL
     train_loader, val_loader, test_loader = build_dataloader(
         cfg=cfg, loop=False, normalize=normalize
     )
 
+    cfg.num_steps_per_epoch = len(train_loader)
+
+    # Load or create model
+    if cfg.load_and_eval:
+        model = load_from_checkpoint_cc(
+            cfg.results_dir, load_fn=SpnMixingCCLEinet.load_from_checkpoint, args=cfg
+        )
+    else:
+        model = SpnMixingCCLEinet(cfg)
+
+    seed_everything(cfg.seed, workers=True)
+
+    print("Training model...")
+
     # Create callbacks
-    logger_wandb = WandbLogger(name=cfg.tag, project="Auto_Einet", group=cfg.group_tag,
+    logger_wandb = WandbLogger(name=cfg.tag, project="mixing_ccleinet", group=cfg.group_tag,
                                offline=not cfg.wandb)
 
     # Store number of model parameters
@@ -69,10 +74,10 @@ def main(cfg: DictConfig):
         "trainable_parameters"
     ] = summary.trainable_parameters
     logger_wandb.experiment.config["trainable_parameters_leaf"] = summary.param_nums[
-        summary.layer_names.index("auto_spn.spn.leaf")
+        summary.layer_names.index("spn.leaf")
     ]
     logger_wandb.experiment.config["trainable_parameters_sums"] = summary.param_nums[
-        summary.layer_names.index("auto_spn.spn.einsum_layers")
+        summary.layer_names.index("spn.einsum_layers")
     ]
 
     # Setup devices
@@ -97,8 +102,6 @@ def main(cfg: DictConfig):
     # Enable rich progress bar
     callbacks.append(RichProgressBar())
 
-    # train encoder and spn
-
     # Create trainer
     trainer = pl.Trainer(
         max_epochs=cfg.epochs,
@@ -110,9 +113,12 @@ def main(cfg: DictConfig):
         precision=cfg.precision,
         fast_dev_run=cfg.debug,
         profiler=cfg.profiler,
+        auto_lr_find=True
     )
 
     if not cfg.load_and_eval:
+        # trainer.tune(model, train_dataloaders=train_loader,
+        #              val_dataloaders=val_loader)
         # Fit model
         trainer.fit(
             model=model, train_dataloaders=train_loader, val_dataloaders=val_loader
@@ -120,15 +126,19 @@ def main(cfg: DictConfig):
 
     print("Evaluating model...")
 
+    if "synth" in cfg.dataset and not cfg.classification:
+        plot_distribution(
+            model=model.spn, dataset_name=cfg.dataset, logger_wandb=logger_wandb
+        )
+
     # Evaluate spn reconstruction error
     test_res = trainer.test(
-        model=model, dataloaders=[train_loader, val_loader, test_loader], verbose=True
+        model=model, dataloaders=[train_loader,
+                                  val_loader, test_loader], verbose=True
     )
-
 
     print("Finished evaluation...")
     return test_res[2]["Test/test_accuracy"]
-
 
 
 def preprocess_cfg(cfg: DictConfig):
@@ -147,8 +157,8 @@ def preprocess_cfg(cfg: DictConfig):
 
     # If results dir is not set, get from ENV, else take ~/results
     if "results_dir" not in cfg:
-        cfg.results_dir = os.getenv("RESULTS_DIR", os.path.join(home, "results"))
-
+        cfg.results_dir = os.getenv(
+            "RESULTS_DIR", os.path.join(home, "results"))
 
     # If FP16/FP32 is given, convert to int (else it's "bf16", keep string)
     if cfg.precision == "16" or cfg.precision == "32":
@@ -164,6 +174,7 @@ def preprocess_cfg(cfg: DictConfig):
         cfg.group_tag = None
 
     cfg.dist = Dist[cfg.dist.upper()]
+
 
 if __name__ == "__main__":
     main()

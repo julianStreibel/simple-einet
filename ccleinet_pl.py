@@ -15,7 +15,7 @@ from pytorch_lightning.utilities.model_summary import (
 
 from exp_utils import (
     setup_experiment,
-    load_from_checkpoint,
+    load_from_checkpoint_cc,
     plot_distribution,
 )
 from models_pl import SpnCCLEinet
@@ -25,19 +25,21 @@ from simple_einet.data import build_dataloader
 # A logger for this file
 logger = logging.getLogger(__name__)
 
+
 @hydra.main(version_base=None, config_path="./conf", config_name="ccleinet_config")
 def main(cfg: DictConfig):
     preprocess_cfg(cfg)
 
     logger.info(OmegaConf.to_yaml(cfg))
 
-    results_dir, cfg = setup_experiment(name="simple-einet", cfg=cfg, remove_if_exists=True)
+    results_dir, cfg = setup_experiment(
+        name="simple-einet", cfg=cfg, remove_if_exists=True)
 
     seed_everything(cfg.seed, workers=True)
 
     if not cfg.wandb:
         os.environ["WANDB_MODE"] = "offline"
-    
+
     # Create dataloader
     normalize = cfg.dist == Dist.NORMAL
     train_loader, val_loader, test_loader = build_dataloader(
@@ -48,8 +50,8 @@ def main(cfg: DictConfig):
 
     # Load or create model
     if cfg.load_and_eval:
-        model = load_from_checkpoint(
-            results_dir, load_fn=SpnCCLEinet.load_from_checkpoint, cfg=cfg
+        model = load_from_checkpoint_cc(
+            cfg.results_dir, load_fn=SpnCCLEinet.load_from_checkpoint, args=cfg
         )
     else:
         model = SpnCCLEinet(cfg)
@@ -57,7 +59,6 @@ def main(cfg: DictConfig):
     seed_everything(cfg.seed, workers=True)
 
     print("Training model...")
-
 
     # Create callbacks
     logger_wandb = WandbLogger(name=cfg.tag, project="CCLEinet", group=cfg.group_tag,
@@ -129,11 +130,13 @@ def main(cfg: DictConfig):
 
     # Evaluate spn reconstruction error
     test_res = trainer.test(
-        model=model, dataloaders=[train_loader, val_loader, test_loader], verbose=True
+        model=model, dataloaders=[train_loader,
+                                  val_loader, test_loader], verbose=True
     )
 
     print("Finished evaluation...")
     return test_res[2]["Test/test_accuracy"]
+
 
 def preprocess_cfg(cfg: DictConfig):
     """
@@ -151,8 +154,8 @@ def preprocess_cfg(cfg: DictConfig):
 
     # If results dir is not set, get from ENV, else take ~/results
     if "results_dir" not in cfg:
-        cfg.results_dir = os.getenv("RESULTS_DIR", os.path.join(home, "results"))
-
+        cfg.results_dir = os.getenv(
+            "RESULTS_DIR", os.path.join(home, "results"))
 
     # If FP16/FP32 is given, convert to int (else it's "bf16", keep string)
     if cfg.precision == "16" or cfg.precision == "32":
@@ -168,6 +171,7 @@ def preprocess_cfg(cfg: DictConfig):
         cfg.group_tag = None
 
     cfg.dist = Dist[cfg.dist.upper()]
+
 
 if __name__ == "__main__":
     main()

@@ -147,5 +147,6 @@ einet/
 outputs/
 CCLEinet/
 Auto_Einet/
+mixing_ccleinet/
 
 *.DS_Store

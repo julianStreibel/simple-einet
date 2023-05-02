@@ -5,7 +5,8 @@ from sklearn.model_selection import train_test_split
 import torch
 
 from simple_einet.distributions import CCRatNormal
-from simple_einet.einet import CCLEinet, EinetConfig
+from simple_einet.einet import EinetConfig
+from simple_einet.ccleinet import CCLEinet
 
 import numpy as np
 

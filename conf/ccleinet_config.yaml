@@ -25,6 +25,7 @@ debug: False
 S: 10
 I: 10
 D: 3
+M: 0
 R: 1
 gpu: 0
 epochs: 10

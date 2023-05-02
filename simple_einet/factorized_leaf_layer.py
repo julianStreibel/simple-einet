@@ -159,6 +159,8 @@ class CCLFactorizedLeaf(FactorizedLeaf):
 
     def __init__(
         self,
+        num_mixes=0,
+        independent_colors=True,
         **args,
     ):
         """
@@ -170,23 +172,70 @@ class CCLFactorizedLeaf(FactorizedLeaf):
         """
 
         super().__init__(**args)
+        self.independent_colors = independent_colors
+        if not independent_colors:
+            self.num_features *= self.base_leaf.num_channels
+        # Size of the factorized groups of RVs
+        cardinality = int(np.round(self.num_features / self.num_features_out))
+        self.num_mixes = num_mixes
+
+        # Construct mapping of scopes from in_features -> out_features
+        scopes = torch.zeros(
+            self.num_features, self.num_features_out, max(1, num_mixes), self.num_repetitions)
+        for r in range(self.num_repetitions):
+            idxs = torch.randperm(n=self.num_features)
+            for o in range(self.num_features_out):
+                low = o * cardinality
+                high = (o + 1) * cardinality
+                if o == self.num_features_out - 1:
+                    high = self.num_features
+                scopes[idxs[low:high], o, :, r] = 1
+
+        self.register_buffer("scopes", scopes)
 
     def forward(self, x: torch.Tensor, y: torch.Tensor, marginalized_scopes: List[int]):
         # Forward through base leaf
         x = self.base_leaf(x, y, marginalized_scopes)
 
-        # Factorize input channels
-        x = x.sum(dim=1)
+        if self.independent_colors:
+            # Factorize input channels
+            x = x.sum(dim=1)
+            x = x.view(
+                x.shape[0],
+                x.shape[1],
+                x.shape[2],
+                max(1, self.num_mixes),
+                -1
+            )
+        else:
+            # create mixture dim and flattend channels in features
+            x = x.view(
+                x.shape[0],
+                x.shape[1] * x.shape[2],
+                x.shape[3],
+                max(1, self.num_mixes),
+                self.num_repetitions
+            )
 
         # Merge scopes by naive factorization
-        x = torch.einsum("bicr,ior->bocr", x, self.scopes)
+        x = torch.einsum("bicmr,iomr->bocmr", x, self.scopes)
 
-        assert x.shape == (
-            x.shape[0],
-            self.num_features_out,
-            self.base_leaf.num_leaves,
-            self.num_repetitions,
-        )
+        if self.num_mixes == 0:
+            x = x.squeeze(3)
+            assert x.shape == (
+                x.shape[0],
+                self.num_features_out,
+                self.base_leaf.num_leaves,
+                self.num_repetitions,
+            )
+        else:
+            assert x.shape == (
+                x.shape[0],
+                self.num_features_out,
+                self.base_leaf.num_leaves,
+                self.num_mixes,
+                self.num_repetitions,
+            )
         return x
 
     def sample(self, y, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:
@@ -205,6 +254,7 @@ class CCLFactorizedLeaf(FactorizedLeaf):
                 self.num_features,
                 self.base_leaf.num_leaves,
             )
+
         elif samples.dim() == 5:
             assert self.num_features == samples.shape[1]
             assert hasattr(self.base_leaf, "cardinality")
@@ -215,9 +265,20 @@ class CCLFactorizedLeaf(FactorizedLeaf):
                 self.base_leaf.num_leaves,
             )
 
+        # create mixture dim
+        samples = samples.view(
+            context.num_samples,
+            self.base_leaf.num_channels,
+            self.num_features,
+            max(1, self.num_mixes),
+            -1
+        )
+
         if not context.is_differentiable:
-            scopes = self.scopes[...,
-                                 context.indices_repetition].permute(2, 0, 1)
+            breakpoint()
+            # bring batch size to the front
+            scopes = self.scopes[..., context.indices_repetition].permute(
+                3, 0, 1, 2)
             rnge_in = torch.arange(self.num_features_out,
                                    device=samples.device)
             scopes = (scopes * rnge_in).sum(-1).long()
@@ -229,32 +290,9 @@ class CCLFactorizedLeaf(FactorizedLeaf):
             samples = samples.gather(dim=-1, index=indices_in_gather)
             samples.squeeze_(-1)  # Remove num_leaves dimension
         else:
-            # i_rep = context.indices_repetition.argmax(-1).long()
-            # i_out = indices_out.argmax(-1).long()
-            # scopes_orig = self.scopes[..., i_rep].permute(2, 0, 1)
-            # rnge_in = torch.arange(self.num_features_out, device=samples.device)
-            # scopes_orig = (scopes_orig * rnge_in).sum(-1).long()
-            # indices_in_gather_orig = i_out.gather(dim=1, index=scopes_orig)
-            # indices_in_gather_orig = indices_in_gather_orig.view(num_samples, 1, -1, 1)
-            #
-            # indices_in_gather_orig = indices_in_gather_orig.expand(-1, samples.shape[1], -1, -1)
-            # samples_orig = samples.gather(dim=-1, index=indices_in_gather_orig)
-            # samples_orig.squeeze_(-1)  # Remove num_leaves dimension
-
-            scopes = self.scopes.unsqueeze(0)  # make space for batch dim
-            r_idx = context.indices_repetition.view(
-                context.num_samples, 1, 1, -1)
-            scopes = index_one_hot(scopes, index=r_idx, dim=-1)
-
-            indices_in = index_one_hot(indices_out.unsqueeze(
-                1), index=scopes.unsqueeze(-1), dim=2)
-
-            indices_in = indices_in.unsqueeze(1)  # make space for channel dim
-            samples = index_one_hot(samples, index=indices_in, dim=-1)
-
-            # assert (samples - samples_orig).sum() < 1e-4
+            raise NotImplementedError
 
         return samples
 
     def extra_repr(self):
-        return f"num_features={self.num_features}, num_features_out={self.num_features_out}"
+        return f"num_features={self.num_features}, num_features_out={self.num_features_out}, num_mixtures={self.num_mixes}, num_repetitions={self.num_repetitions}"

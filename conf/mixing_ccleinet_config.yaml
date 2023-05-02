@@ -1,8 +1,8 @@
 defaults:
   - _self_
   - experiment: null
-  # - override hydra/job_logging: colorlog
-  # - override hydra/hydra_logging: colorlog
+  - override hydra/sweeper: optuna
+  - override hydra/sweeper/sampler: tpe
 
 # Default set of configurations.
 data_dir: ???
@@ -25,12 +25,13 @@ debug: False
 S: 10
 I: 10
 D: 3
+M: 5
 R: 1
 gpu: 0
 epochs: 10
 load_and_eval: False
 cp: True
-dist: "binomial"
+dist: "cclbinomial"
 precision: 16
 group_tag: ???
 tag: ???
@@ -40,3 +41,7 @@ profiler: ???
 log_weights: False
 dataset: cifar
 num_classes: 10
+weight_decay: 0
+weight_decay_decay: 1
+num_steps_per_epoch: None
+leaf_dropout: 0
