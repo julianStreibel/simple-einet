@@ -114,6 +114,7 @@ class MixingCCLEinet(Einet):
                 num_mixtures_out=_num_mixes_out,
                 num_repetitions=self.config.num_repetitions,
                 dropout=self.config.dropout,
+                sum_dropout=self.config.sum_dropout
             )
 
             einsum_layers.append(layer)

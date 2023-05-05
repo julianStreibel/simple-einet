@@ -15,7 +15,7 @@ from pytorch_lightning.utilities.model_summary import (
 
 from exp_utils import (
     setup_experiment,
-    load_from_checkpoint_cc,
+    load_from_checkpoint,
     plot_distribution,
 )
 from models_pl import SpnMixingCCLEinet

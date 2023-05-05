@@ -29,6 +29,7 @@ def make_einet(cfg, num_classes: int = 1, einet_class=Einet):
         leaf_kwargs=leaf_kwargs,
         leaf_type=leaf_type,
         dropout=cfg.dropout,
+        sum_dropout=cfg.sum_dropout,
         cross_product=cfg.cp,
         log_weights=cfg.log_weights,
     )

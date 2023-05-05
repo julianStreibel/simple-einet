@@ -256,6 +256,7 @@ class CCLFactorizedLeaf(FactorizedLeaf):
             )
 
         elif samples.dim() == 5:
+            raise NotImplementedError
             assert self.num_features == samples.shape[1]
             assert hasattr(self.base_leaf, "cardinality")
             assert samples.shape == (
@@ -270,15 +271,14 @@ class CCLFactorizedLeaf(FactorizedLeaf):
             context.num_samples,
             self.base_leaf.num_channels,
             self.num_features,
-            max(1, self.num_mixes),
             -1
         )
 
         if not context.is_differentiable:
-            breakpoint()
             # bring batch size to the front
-            scopes = self.scopes[..., context.indices_repetition].permute(
-                3, 0, 1, 2)
+            scopes = self.scopes[...,
+                                 context.indices_repetition].permute(3, 0, 1, 2)
+            scopes = scopes.squeeze(-1)
             rnge_in = torch.arange(self.num_features_out,
                                    device=samples.device)
             scopes = (scopes * rnge_in).sum(-1).long()

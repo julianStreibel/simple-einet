@@ -42,9 +42,7 @@ class SpnCCLEinet(LitModel):
         # Construct SPN
         self.spn = make_einet(cfg, num_classes=10, einet_class=CCLEinet)
         self.cfg = cfg
-        if cfg.classification:
-            # Define loss function
-            self.criterion = nn.NLLLoss()
+        self.criterion = nn.NLLLoss()
 
     def training_step(self, train_batch, batch_idx):
         loss, acc = self.get_scores(
@@ -55,21 +53,21 @@ class SpnCCLEinet(LitModel):
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        # self.generate_samples(num_samples=100, class_index=list(
-        #     range(10)) * 10, mpe_at_leaves=True)
-        loss, accuracy = self.get_scores(val_batch)
+        self.generate_samples(num_samples=100, class_index=list(
+            range(10)) * 10, mpe_at_leaves=True)
+        loss, accuracy = self.get_scores(val_batch, training=False)
         self.log("Val/accuracy", accuracy, prog_bar=True)
         self.log("Val/loss", loss, prog_bar=True)
         return loss
 
     def test_step(self, batch, batch_idx, dataloader_id=0):
-        loss, accuracy = self.get_scores(batch)
+        loss, accuracy = self.get_scores(batch, training=False)
         set_name = DATALOADER_ID_TO_SET_NAME[dataloader_id]
         self.log(f"Test/{set_name}_accuracy",
                  accuracy, add_dataloader_idx=False)
         self.log(f"Test/{set_name}_loss", loss, add_dataloader_idx=False)
 
-    def get_scores(self, batch, leaf_dropout=0):
+    def get_scores(self, batch, leaf_dropout=0, training=True):
         data, labels = batch
         data = self.preprocess(data)
         marginalized_scopes = None
@@ -77,14 +75,14 @@ class SpnCCLEinet(LitModel):
             n = torch.tensor(data.shape[-2:]).prod()
             n_max = (n * leaf_dropout).int()
             marginalized_scopes = torch.randperm(n)[:n_max]
-        if self.cfg.classification:
+        if self.cfg.classification or not training:
             joints = self.spn(data, marginalization_mask=marginalized_scopes)
             data_marginial = torch.logsumexp(joints, 1).reshape(-1, 1)
             data_conditional = joints - data_marginial
             acc = self._get_accuracy(data_conditional, labels)
             return self.criterion(data_conditional, labels), acc
         else:
-            return - self.spn(data, labels, marginalization_mask=marginalized_scopes).mean(), None
+            return - self.spn(data, labels, marginalization_mask=marginalized_scopes).mean(), -1
 
     def _get_accuracy(self, ll, labels) -> torch.Tensor:
         return (labels == ll.argmax(-1)).sum() / ll.shape[0]

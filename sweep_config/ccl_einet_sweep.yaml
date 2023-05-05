@@ -9,29 +9,38 @@ parameters:
     min: 10
     distribution: int_uniform
   lr:
-    max: 0.01
+    max: 0.1
     min: 0.00001
     distribution: uniform
   S:
-    max: 20
-    min: 2
+    max: 15
+    min: 5
     distribution: int_uniform
   R:
     max: 10
     min: 2
     distribution: int_uniform
   I:
-    max: 20
-    min: 6
+    max: 15
+    min: 5
     distribution: int_uniform
   D:
     max: 10
     min: 3
     distribution: int_uniform
-  leaf_dropout:
-    max: 0.5
+  sum_dropout:
+    max: 0.8
     min: 0.0
     distribution: uniform
+  dist:
+    values:
+      - "cclnormal"
+      - "cclbinomial"
+    distribution: categorical
+  dist:
+  classification:
+    - False
+  distribution: categorical
 command:
   - ${env}
   - python

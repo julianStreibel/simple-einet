@@ -15,13 +15,12 @@ from pytorch_lightning.utilities.model_summary import (
 
 from exp_utils import (
     setup_experiment,
-    load_from_checkpoint_cc,
+    load_from_checkpoint,
     plot_distribution,
 )
 from models_pl import SpnCCLEinet
 from simple_einet.data import Dist
 from simple_einet.data import build_dataloader
-
 # A logger for this file
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ def main(cfg: DictConfig):
 
     # Load or create model
     if cfg.load_and_eval:
-        model = load_from_checkpoint_cc(
+        model = load_from_checkpoint(
             cfg.results_dir, load_fn=SpnCCLEinet.load_from_checkpoint, args=cfg
         )
     else:
@@ -63,6 +62,7 @@ def main(cfg: DictConfig):
     # Create callbacks
     logger_wandb = WandbLogger(name=cfg.tag, project="CCLEinet", group=cfg.group_tag,
                                offline=not cfg.wandb)
+    logger_wandb.watch(model)
 
     # Store number of model parameters
     summary = ModelSummary(model, max_depth=-1)

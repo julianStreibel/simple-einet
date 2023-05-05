@@ -45,6 +45,7 @@ class EinetConfig:
     num_classes: int = 1
     depth: int = 1
     dropout: float = 0.0
+    sum_dropout: float = 0.0
     leaf_type: Type = None
     leaf_kwargs: Dict[str, Any] = None
     cross_product: bool = False
@@ -64,6 +65,8 @@ class EinetConfig:
         self.num_leaves = check_valid(self.num_leaves, int, 1)
         self.dropout = check_valid(
             self.dropout, float, 0.0, 1.0, allow_none=True)
+        self.sum_dropout = check_valid(
+            self.sum_dropout, float, 0.0, 1.0, allow_none=True)
         assert self.leaf_type is not None, "EinetConfig.leaf_type parameter was not set!"
 
         assert isinstance(self.leaf_type, type) and issubclass(

@@ -7,6 +7,7 @@ from torch import nn
 
 from simple_einet.distributions import CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer
+from simple_einet.einsum_layer_prod_dropout import EinsumLayerProdDropout
 from simple_einet.utils import SamplingContext, provide_evidence
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.factorized_leaf_layer import CCLFactorizedLeaf
@@ -76,17 +77,20 @@ class CCLEinet(Einet):
 
             if i < self.config.depth:
                 _num_sums_in = self.config.num_sums
+                _sum_dropout = self.config.sum_dropout
             else:
                 _num_sums_in = self.config.num_leaves
+                _sum_dropout = 0.
 
             in_features = 2**i
 
-            layer = EinsumLayer(
+            layer = EinsumLayerProdDropout(
                 num_features=in_features,
                 num_sums_in=_num_sums_in,
                 num_sums_out=self.config.num_sums,
                 num_repetitions=self.config.num_repetitions,
                 dropout=self.config.dropout,
+                sum_dropout=_sum_dropout
             )
 
             einsum_layers.append(layer)
@@ -108,12 +112,13 @@ class CCLEinet(Einet):
             self.config.num_repetitions
         )
 
-        self._joint_layer = EinsumLayer(
+        self._joint_layer = EinsumLayerProdDropout(
             num_features=2,
             num_sums_in=self.config.num_sums,  # take sums out from last layer
             num_sums_out=1,
             num_repetitions=self.config.num_repetitions,
             dropout=self.config.dropout,
+            sum_dropout=self.config.sum_dropout
         )
 
         # If model has multiple reptitions, add repetition mixing layer

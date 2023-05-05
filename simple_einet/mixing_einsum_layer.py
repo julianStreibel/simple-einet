@@ -20,6 +20,7 @@ class MixingEinsumLayer(AbstractLayer):
         num_mixtures_out: int,
         num_repetitions: int,
         dropout: float = 0.0,
+        sum_dropout: float = 0.0
     ):
         super().__init__(num_features, num_repetitions=num_repetitions)
 
@@ -53,11 +54,17 @@ class MixingEinsumLayer(AbstractLayer):
 
         self.einsum_weights = nn.Parameter(einsum_weights)
 
-        # Dropout
+        # product Dropout
         self.dropout = check_valid(
             dropout, expected_type=float, lower_bound=0.0, upper_bound=1.0)
-        self._bernoulli_dist = torch.distributions.Bernoulli(
+        self._prod_bernoulli_dist = torch.distributions.Bernoulli(
             probs=self.dropout)
+
+        # sum Dropout
+        self.sum_dropout = check_valid(
+            sum_dropout, expected_type=float, lower_bound=0.0, upper_bound=1.0)
+        self._sum_bernoulli_dist = torch.distributions.Bernoulli(
+            probs=self.sum_dropout)
 
         # Necessary for sampling with evidence: Save input during forward pass.
         self._is_input_cache_enabled = False
@@ -70,8 +77,8 @@ class MixingEinsumLayer(AbstractLayer):
     def forward(self, x):
         # Apply dropout: remove random sum component
         if self.dropout > 0.0 and self.training:
-            # dropout_indices = self._bernoulli_dist.sample(x.shape).bool()
-            # x[dropout_indices] = np.NINF
+            dropout_indices = self._prod_bernoulli_dist.sample(x.shape).bool()
+            x[dropout_indices] = np.NINF
             pass
 
         # Dimensions
@@ -89,7 +96,7 @@ class MixingEinsumLayer(AbstractLayer):
         right = x[:, 1::2]
 
         # Prepare for LogEinsumExp trick (see paper for details)
-        left_max = torch.max(left, dim=2, keepdim=True)[0]  # TODO: dim=4?!
+        left_max = torch.max(left, dim=2, keepdim=True)[0]
         left_prob = torch.exp(left - left_max)
         right_max = torch.max(right, dim=2, keepdim=True)[0]
         right_prob = torch.exp(right - right_max)
@@ -98,7 +105,6 @@ class MixingEinsumLayer(AbstractLayer):
         einsum_weights = self.einsum_weights
         einsum_weights = einsum_weights.view(
             D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, -1)
-        # TODO: Is this normalizing the weights for each sum or also over all sums?
         einsum_weights = F.softmax(einsum_weights, dim=-1)
         einsum_weights = einsum_weights.view(self.einsum_weights.shape)
 
@@ -116,14 +122,36 @@ class MixingEinsumLayer(AbstractLayer):
             self._input_cache_right = right
             self._input_cache = prob.clone()
 
+        mixing_weights = self.mixing_weights
+
+        if self.sum_dropout > 0.0 and self.training:
+            dropout_indices = self._sum_bernoulli_dist.sample(
+                mixing_weights.shape).bool().cuda()
+
+            indices_all_dropout = dropout_indices.all(
+                dim=-1, keepdim=True).expand(-1, -1, -1, -1, self.num_mixtures_in).cuda()
+
+            replacement = torch.nn.functional.one_hot(
+                torch.rand_like(mixing_weights).argmax(dim=-1), self.num_mixtures_in).bool().cuda()
+
+            dropout_indices = torch.where(
+                indices_all_dropout, replacement, dropout_indices)
+            ninf = torch.zeros_like(mixing_weights)
+            ninf[dropout_indices] = np.NINF
+
+            mixing_weights = mixing_weights + ninf
+
+        mixing_weights = F.softmax(mixing_weights, dim=-1)
+
         probs_max = torch.max(prob, dim=3, keepdim=True)[0]
         probs = torch.exp(prob - probs_max)
 
-        mixing_weights = self.mixing_weights
-        mixing_weights = F.softmax(mixing_weights, dim=-1)
         # n: batch, d: features, s: sums,  i: mixtures in, o: mixtures out, r: repetitions
         out = torch.einsum("ndsir,dsori->ndsor", probs, mixing_weights)
         lls = torch.log(out) + probs_max
+
+        if lls.isnan().any():
+            breakpoint()
 
         return lls
 

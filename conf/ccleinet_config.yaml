@@ -24,9 +24,9 @@ device: "cuda"
 debug: False
 S: 10
 I: 10
-D: 3
+D: 6
 M: 0
-R: 1
+R: 3
 gpu: 0
 epochs: 10
 load_and_eval: False
@@ -45,3 +45,4 @@ weight_decay: 0
 weight_decay_decay: 1
 num_steps_per_epoch: None
 leaf_dropout: 0
+sum_dropout: 0.
