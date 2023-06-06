@@ -10,7 +10,7 @@ from simple_einet.type_checks import check_valid
 from simple_einet.utils import SamplingContext, index_one_hot, diff_sample_one_hot
 
 
-class MixingEinsumLayer(AbstractLayer):
+class MixingClassEinsumLayer(AbstractLayer):
     def __init__(
         self,
         num_features: int,
@@ -19,6 +19,7 @@ class MixingEinsumLayer(AbstractLayer):
         num_mixtures_in: int,
         num_mixtures_out: int,
         num_repetitions: int,
+        num_classes: int,
         dropout: float = 0.0,
         sum_dropout: float = 0.0,
         mixing_depth: int = 1,
@@ -31,6 +32,7 @@ class MixingEinsumLayer(AbstractLayer):
         self.num_mixtures_in = check_valid(num_mixtures_in, int, 1)
         self.num_mixtures_out = check_valid(num_mixtures_out, int, 1)
         self.num_repetitions = check_valid(num_repetitions, int, 1)
+        self.num_classes = check_valid(num_classes, int, 1)
         cardinality = 2  # Fixed to binary graphs for now
         self.cardinality = check_valid(cardinality, int, 2, num_features + 1)
         self.num_features_out = np.ceil(
@@ -59,6 +61,7 @@ class MixingEinsumLayer(AbstractLayer):
                 self.num_sums_out,
                 num_m_out,
                 self.num_repetitions,
+                self.num_classes,
                 num_m_in,
             )
             mixing_weights_list.append(nn.Parameter(mixing_weights))
@@ -69,6 +72,7 @@ class MixingEinsumLayer(AbstractLayer):
             self.num_sums_out,
             self.num_mixtures_in,
             self.num_repetitions,
+            self.num_classes,
             self.num_sums_in,
             self.num_sums_in,
         )
@@ -93,7 +97,7 @@ class MixingEinsumLayer(AbstractLayer):
         self._input_cache_right = None
         self._input_cache = None
 
-        self.out_shape = f"(N, {self.num_features_out}, {self.num_sums_out}, {self.num_mixtures_out}, {self.num_repetitions})"
+        self.out_shape = f"(N, {self.num_features_out}, {self.num_sums_out}, {self.num_mixtures_out}, {self.num_repetitions}, {self.num_classes})"
 
     def forward(self, x):
         # Apply dropout: remove random sum component
@@ -108,7 +112,8 @@ class MixingEinsumLayer(AbstractLayer):
         # S: Sums
         # M: Mixtures
         # R: Repetitions
-        N, D, S, M, R = x.size()
+        # C: Classes
+        N, D, S, M, R, C = x.size()
 
         D_out = D // 2
 
@@ -125,13 +130,13 @@ class MixingEinsumLayer(AbstractLayer):
         # Project weights into valid space
         einsum_weights = self.einsum_weights
         einsum_weights = einsum_weights.view(
-            D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, -1)
+            D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, self.num_classes, -1)
         einsum_weights = F.softmax(einsum_weights, dim=-1)
         einsum_weights = einsum_weights.view(self.einsum_weights.shape)
 
         # Einsum operation for sum(product(x))
         # n: batch, i: left-channels, j: right-channels, d:features, o: output-channels, m: mixtures, r: repetitions
-        prob = torch.einsum("ndimr,ndjmr,domrij->ndomr",
+        prob = torch.einsum("ndimrc,ndjmrc,domrcij->ndomrc",
                             left_prob, right_prob, einsum_weights)
 
         # LogEinsumExp trick, re-add the max
@@ -151,7 +156,7 @@ class MixingEinsumLayer(AbstractLayer):
                     mixing_weights.shape).bool().cuda()
 
                 indices_all_dropout = dropout_indices.all(
-                    dim=-1, keepdim=True).expand(-1, -1, -1, -1, self.num_mixtures_in).cuda()
+                    dim=-1, keepdim=True).expand(-1, -1, -1, -1, -1, self.num_mixtures_in).cuda()
 
                 replacement = torch.nn.functional.one_hot(
                     torch.rand_like(mixing_weights).argmax(dim=-1), self.num_mixtures_in).bool().cuda()
@@ -169,7 +174,7 @@ class MixingEinsumLayer(AbstractLayer):
             probs = torch.exp(prob - probs_max)
 
             # n: batch, d: features, s: sums,  i: mixtures in, o: mixtures out, r: repetitions
-            out = torch.einsum("ndsir,dsori->ndsor", probs, mixing_weights)
+            out = torch.einsum("ndsirc,dsorci->ndsorc", probs, mixing_weights)
             prob = torch.log(out) + probs_max
 
         return prob

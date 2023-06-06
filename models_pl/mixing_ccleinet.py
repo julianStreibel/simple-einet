@@ -47,7 +47,26 @@ class SpnMixingCCLEinet(LitModel):
             # Define loss function
             self.criterion = nn.NLLLoss()
 
+        self.training_permutation = True
+        if cfg.switch_permutation:
+            self.switch(self.training_permutation)
+
+    def switch(self, training_permutation=None):
+        if training_permutation is not None:
+            self.training_permutation = training_permutation
+        else:
+            self.training_permutation = not self.training_permutation
+
+        for params in self.spn.parameters():
+            params.requires_grad = not self.training_permutation
+        for params in self.spn.leaf.permutation_layer.parameters():
+            params.requires_grad = self.training_permutation
+
+        self.log("train permutation", self.training_permutation, prog_bar=True)
+
     def training_step(self, train_batch, batch_idx):
+        if batch_idx > 0 and batch_idx % 100 == 0 and self.cfg.switch_permutation:
+            self.switch()
         loss, acc = self.get_scores(
             train_batch, leaf_dropout=self.cfg.leaf_dropout)
         if acc is not None:
@@ -68,6 +87,19 @@ class SpnMixingCCLEinet(LitModel):
                  accuracy, add_dataloader_idx=False)
         self.log(f"Test/{set_name}_loss", loss, add_dataloader_idx=False)
 
+    def conditional_entropy(self, log_joints, log_conditional):
+        """
+        cond_entropy = - sum(p(x, y) * log(p(x, y)/p(y)))
+        """
+        return - (log_joints.exp() * log_conditional).sum()
+
+    def entropy(self, ll):
+        """ 
+        entropy(p) = - sum(p * log(p))
+        We have ll = log(p) -> entropy = - sum(exp(ll) * ll)
+        """
+        return - (ll * ll.exp()).sum()
+
     def get_scores(self, batch, leaf_dropout=0):
         data, labels = batch
         data = self.preprocess(data)
@@ -81,7 +113,18 @@ class SpnMixingCCLEinet(LitModel):
             data_marginial = torch.logsumexp(joints, 1).reshape(-1, 1)
             data_conditional = joints - data_marginial
             acc = self._get_accuracy(data_conditional, labels)
-            return self.criterion(data_conditional, labels), acc
+            # conditional_entropy
+            loss = self.criterion(data_conditional, labels)
+            # get prob of actual data
+            labels = labels.unsqueeze(-1)
+            # joint = joints.gather(-1, labels)
+            data_cond = data_conditional.gather(-1, labels)
+            # cond_ent = self.conditional_entropy(joint, data_cond)
+            # self.log("Cond. Entropy", cond_ent, prog_bar=True)
+            ent = self.entropy(data_cond)
+            self.log("Entropy", ent, prog_bar=True)
+            loss = loss - self.cfg.tau * ent
+            return loss, acc
         else:
             return - self.spn(data, labels, marginalization_mask=marginalized_scopes).mean(), None
 
@@ -128,13 +171,15 @@ class SpnMixingCCLEinet(LitModel):
             {"params": self.spn.einsum_layers.parameters()},
             {"params": self.spn._class_dist.parameters()},
             {"params": self.spn._joint_layer.parameters()},
-            {"params": self.spn.leaf.parameters(), "weight_decay": self.cfg.weight_decay}
+            {"params": self.spn.leaf.permutation_layer.parameters(), "lr": 0.99},
+            {"params": self.spn.leaf.base_leaf.parameters(
+            ), "weight_decay": self.cfg.weight_decay}
         ], lr=self.learning_rate)
 
-        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
             optimizer,
-            max_lr=self.cfg.lr,
-            steps_per_epoch=self.cfg.num_steps_per_epoch,
-            epochs=self.cfg.epochs
+            milestones=[int(0.7 * self.cfg.epochs),
+                        int(0.9 * self.cfg.epochs)],
+            gamma=0.1,
         )
         return [optimizer], [lr_scheduler]

@@ -1,0 +1,46 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+method: bayes
+metric:
+  goal: maximize
+  name: Test/val_accuracy
+parameters:
+  D:
+    distribution: int_uniform
+    max: 10
+    min: 5
+  I:
+    distribution: int_uniform
+    max: 20
+    min: 1
+  M:
+    distribution: int_uniform
+    max: 15
+    min: 2
+  R:
+    distribution: int_uniform
+    max: 2
+    min: 1
+  S:
+    distribution: int_uniform
+    max: 25
+    min: 5
+  batch_size:
+    distribution: int_uniform
+    max: 300
+    min: 10
+  learn_permutations:
+    value: false
+  lr:
+    distribution: uniform
+    max: 0.1
+    min: 0.0001
+  shuffle_features:
+    values:
+    - false
+    - true
+    distribution: categorical
+program: mixing_einet_pl.py

@@ -46,3 +46,14 @@ weight_decay_decay: 1
 num_steps_per_epoch: None
 leaf_dropout: 0
 sum_dropout: 0.
+tau: 0.
+noise_std: 0
+range: None,
+gradient_clip_val: 0
+mixup: False
+mixup_alpha: 1
+learn_permutations: False
+sinkhorn_tau: 1
+switch_permutation: False
+independent_colors: True
+shuffle_features: True

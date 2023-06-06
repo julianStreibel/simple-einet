@@ -26,9 +26,8 @@ class LitModel(pl.LightningModule, ABC):
         self.save_hyperparameters()
 
     def preprocess(self, data: torch.Tensor):
-        if self.cfg.dist == Dist.BINOMIAL or self.cfg.dist == Dist.CCLBINOMIAL:
+        if self.cfg.dist == Dist.BINOMIAL or self.cfg.dist == Dist.CCLBINOMIAL or self.cfg.dist == Dist.CCLMIXTURE:
             data *= 255.0
-
         return data
 
     def configure_optimizers(self):

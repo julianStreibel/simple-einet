@@ -10,111 +10,17 @@ from torch import nn
 
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_, CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
+from simple_einet.mixing_einsum_layer import MixingEinsumLayer
 from simple_einet.factorized_leaf_layer import FactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
 from simple_einet.utils import SamplingContext, provide_evidence
+from simple_einet.einet import EinetConfig, Einet
 
 logger = logging.getLogger(__name__)
 
 
-@ dataclass
-class EinetConfig:
-    """
-    Class for keeping the RatSpn config. Parameter names are according to the original RatSpn paper.
-
-    num_features: int  # Number of input features
-    num_channels: int  # Number of input channels
-    num_sums: int  # Number of sum nodes at each layer
-    num_leaves: int  # Number of distributions for each scope at the leaf layer
-    num_repetitions: int  # Number of repetitions
-    num_classes: int  # Number of root heads / Number of classes
-    depth: int  # Tree depth
-    dropout: float  # Dropout probabilities for leaves and sum layers
-    leaf_type: Type  # Type of the leaf base class (Normal, Bernoulli, etc)
-    leaf_kwargs: Dict  # Parameters for the leaf base class
-    cross_product: bool  # Whether to use the cross-product in the einsumlayer or not
-    """
-
-    num_features: int = None
-    num_channels: int = 1
-    num_sums: int = 10
-    num_leaves: int = 10
-    num_repetitions: int = 5
-    num_mixes: int = 0
-    num_classes: int = 1
-    depth: int = 1
-    dropout: float = 0.0
-    sum_dropout: float = 0.0
-    learn_permutations: bool = False
-    switch_permutation: bool = False
-    sinkhorn_tau: float = 0.
-    leaf_type: Type = None
-    leaf_kwargs: Dict[str, Any] = None
-    cross_product: bool = False
-    log_weights: bool = False
-    independent_colors: bool = True
-    shuffle_features: bool = True
-    mixing_depth: int = 1
-    num_hidden_mixtures: int = None
-
-    def assert_valid(self):
-        """Check whether the configuration is valid."""
-
-        # Check that each dimension is valid
-        self.depth = check_valid(self.depth, int, 1)
-        self.num_features = check_valid(self.num_features, int, 2)
-        self.num_channels = check_valid(self.num_channels, int, 1)
-        self.num_mixes = check_valid(self.num_mixes, int, 0)
-        self.num_classes = check_valid(self.num_classes, int, 1)
-        self.num_sums = check_valid(self.num_sums, int, 1)
-        self.num_repetitions = check_valid(self.num_repetitions, int, 1)
-        self.num_leaves = check_valid(self.num_leaves, int, 1)
-        self.dropout = check_valid(
-            self.dropout, float, 0.0, 1.0, allow_none=True)
-        self.sum_dropout = check_valid(
-            self.sum_dropout, float, 0.0, 1.0, allow_none=True)
-        self.switch_permutation = self.switch_permutation
-        self.learn_permutations = self.learn_permutations
-        self.sinkhorn_tau = self.sinkhorn_tau
-        assert self.leaf_type is not None, "EinetConfig.leaf_type parameter was not set!"
-        self.independent_colors = self.independent_colors
-        self.shuffle_features = self.shuffle_features
-        self.mixing_depth = self.mixing_depth
-        self.num_hidden_mixtures = self.num_hidden_mixtures
-
-        assert isinstance(self.leaf_type, type) and issubclass(
-            self.leaf_type, AbstractLeaf
-        ), f"Parameter EinetConfig.leaf_base_class must be a subclass type of Leaf but was {self.leaf_type}."
-
-        if self.independent_colors:
-            assert (
-                2**self.depth <= self.num_features
-            ), f"The tree depth D={self.depth} must be <= {np.floor(np.log2(self.num_features))} (log2(in_features))."
-        else:
-            assert (
-                2**self.depth <= self.num_features * self.num_channels
-            ), f"The tree depth D={self.depth} must be <= {np.floor(np.log2(self.num_features * self.num_channels))} (log2(num_features * num_channels))."
-
-    def __setattr__(self, key, value):
-        """
-        Implement __setattr__ so that an EinetConfig object can be created empty `EinetConfig()` and properties can be
-        set afterwards.
-        """
-        if hasattr(self, key):
-            super().__setattr__(key, value)
-        else:
-            raise AttributeError(f"EinetConfig object has no attribute {key}")
-
-
-class Einet(nn.Module):
-    """
-    Einet RAT SPN PyTorch implementation with layer-wise tensors.
-
-    See also:
-    - RAT SPN: https://arxiv.org/abs/1806.01910
-    - EinsumNetworks: https://arxiv.org/abs/2004.06231
-    """
+class MixingEinet(Einet):
 
     def __init__(self, config: EinetConfig):
         """
@@ -123,17 +29,9 @@ class Einet(nn.Module):
         Args:
             config (RatSpnConfig): RatSpn configuration object.
         """
-        super().__init__()
-        config.assert_valid()
-        self.config = config
+        super().__init__(config)
 
-        # Construct the architecture
-        self._build()
-
-        # Initialize weights
-        self._init_weights()
-
-    def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, sinkhorn_tau=None) -> torch.Tensor:
         """
         Inference pass for the Einet model.
 
@@ -155,10 +53,13 @@ class Einet(nn.Module):
         assert x.shape[1] == self.config.num_channels
 
         # Apply leaf distributions (replace marginalization indicators with 0.0 first)
-        x = self.leaf(x, marginalization_mask)
+        x = self.leaf(x, marginalization_mask, tau=sinkhorn_tau)
 
         # Pass through intermediate layers
         x = self._forward_layers(x)
+
+        # remove mixing dim
+        x = x.squeeze(3)
 
         # Merge results from the different repetitions into the channel dimension
         batch_size, features, channels, repetitions = x.size()
@@ -218,18 +119,24 @@ class Einet(nn.Module):
 
             if i > 1:
                 _num_sums_out = self.config.num_sums
+                _num_mixes_out = self.config.num_mixes
             else:
                 _num_sums_out = self.config.num_classes
+                _num_mixes_out = 1
 
             in_features = 2**i
 
             if self.config.cross_product:
-                layer = EinsumLayer(
+                layer = MixingEinsumLayer(
                     num_features=in_features,
                     num_sums_in=_num_sums_in,
                     num_sums_out=_num_sums_out,
+                    num_mixtures_in=self.config.num_mixes,
+                    num_mixtures_out=_num_mixes_out,
                     num_repetitions=self.config.num_repetitions,
                     dropout=self.config.dropout,
+                    mixing_depth=self.config.mixing_depth,
+                    num_hidden_mixtures=self.config.num_hidden_mixtures
                 )
             else:
                 if self.config.log_weights:
@@ -284,11 +191,12 @@ class Einet(nn.Module):
     def _build_input_distribution(self, num_features_out: int):
         """Construct the input distribution layer."""
         # Cardinality is the size of the region in the last partitions
+        num_reps = self.config.num_repetitions * max(1, self.config.num_mixes)
         base_leaf = self.config.leaf_type(
             num_features=self.config.num_features,
             num_channels=self.config.num_channels,
             num_leaves=self.config.num_leaves,
-            num_repetitions=self.config.num_repetitions,
+            num_repetitions=num_reps,
             **self.config.leaf_kwargs,
         )
 
@@ -296,7 +204,12 @@ class Einet(nn.Module):
             num_features=base_leaf.out_features,
             num_features_out=num_features_out,
             num_repetitions=self.config.num_repetitions,
+            num_mixes=self.config.num_mixes,
+            learn_permutations=self.config.learn_permutations,
+            tau=self.config.sinkhorn_tau,
+            independent_colors=self.config.independent_colors,
             base_leaf=base_leaf,
+            shuffle_features=self.config.shuffle_features
         )
 
     @ property

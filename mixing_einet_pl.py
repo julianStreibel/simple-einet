@@ -3,15 +3,13 @@ import logging
 from omegaconf import DictConfig, OmegaConf
 import os
 
-import torch
-
 import hydra
 import pytorch_lightning as pl
 import torch.utils.data
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import StochasticWeightAveraging, RichProgressBar
-import torchvision.transforms as transforms
 from pytorch_lightning.loggers import WandbLogger
+import wandb
 from pytorch_lightning.utilities.model_summary import (
     ModelSummary,
 )
@@ -21,27 +19,15 @@ from exp_utils import (
     load_from_checkpoint,
     plot_distribution,
 )
-from models_pl import SpnCCLEinet
+from models_pl.mixing_einet import SpnMixingEinet
 from simple_einet.data import Dist
 from simple_einet.data import build_dataloader
+
 # A logger for this file
 logger = logging.getLogger(__name__)
 
 
-class AddGaussianNoise(torch.nn.Module):
-    def __init__(self, mean=0., std=0.1):
-        super().__init__()
-        self.std = std
-        self.mean = mean
-
-    def forward(self, x):
-        return x + torch.randn(x.shape) * self.std + self.mean
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-
-@hydra.main(version_base=None, config_path="./conf", config_name="ccleinet_config")
+@hydra.main(version_base=None, config_path="./conf", config_name="mixing_einet_config")
 def main(cfg: DictConfig):
     preprocess_cfg(cfg)
 
@@ -56,16 +42,9 @@ def main(cfg: DictConfig):
         os.environ["WANDB_MODE"] = "offline"
 
     # Create dataloader
-    additional_transforms = [
-        transforms.ToTensor(),
-        transforms.RandomApply([
-            AddGaussianNoise(0, std=cfg.noise_std),
-        ], p=0.5),
-        transforms.ToPILImage()
-    ]
     normalize = cfg.dist == Dist.NORMAL
     train_loader, val_loader, test_loader = build_dataloader(
-        cfg=cfg, loop=False, normalize=normalize, additional_transforms=additional_transforms
+        cfg=cfg, loop=False, normalize=normalize
     )
 
     cfg.num_steps_per_epoch = len(train_loader)
@@ -73,17 +52,17 @@ def main(cfg: DictConfig):
     # Load or create model
     if cfg.load_and_eval:
         model = load_from_checkpoint(
-            cfg.results_dir, load_fn=SpnCCLEinet.load_from_checkpoint, args=cfg
+            results_dir, load_fn=SpnMixingEinet.load_from_checkpoint, cfg=cfg
         )
     else:
-        model = SpnCCLEinet(cfg)
+        model = SpnMixingEinet(cfg)
 
     seed_everything(cfg.seed, workers=True)
 
     print("Training model...")
 
     # Create callbacks
-    logger_wandb = WandbLogger(name=cfg.tag, project="CCLEinet", group=cfg.group_tag,
+    logger_wandb = WandbLogger(name=cfg.tag, project="mixing_einet", group=cfg.group_tag,
                                offline=not cfg.wandb)
     logger_wandb.watch(model, log="all")
 
@@ -136,7 +115,6 @@ def main(cfg: DictConfig):
         precision=cfg.precision,
         fast_dev_run=cfg.debug,
         profiler=cfg.profiler,
-        gradient_clip_val=cfg.gradient_clip_val
     )
 
     if not cfg.load_and_eval:
@@ -153,13 +131,13 @@ def main(cfg: DictConfig):
         )
 
     # Evaluate spn reconstruction error
-    test_res = trainer.test(
+    trainer.test(
         model=model, dataloaders=[train_loader,
                                   val_loader, test_loader], verbose=True
     )
 
+    wandb.finish()
     print("Finished evaluation...")
-    return test_res[2]["Test/test_accuracy"]
 
 
 def preprocess_cfg(cfg: DictConfig):
@@ -193,9 +171,6 @@ def preprocess_cfg(cfg: DictConfig):
 
     if "group_tag" not in cfg:
         cfg.group_tag = None
-
-    if "noise_std" not in cfg:
-        cfg.noise_std = 0
 
     cfg.dist = Dist[cfg.dist.upper()]
 

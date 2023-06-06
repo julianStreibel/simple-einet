@@ -17,8 +17,9 @@ from torch.utils.data.sampler import Sampler
 from torchvision.datasets import CIFAR10, MNIST, SVHN, CelebA, FashionMNIST, LSUN
 from torchvision.transforms.functional import InterpolationMode
 
-from simple_einet.distributions import RatNormal, CCRatNormal
+from simple_einet.distributions import RatNormal, CCRatNormal, ClassRatNormal
 from simple_einet.distributions.binomial import Binomial, CCBinomial
+from simple_einet.distributions.mixture import CCLMixture
 
 
 @dataclass
@@ -66,6 +67,7 @@ def get_data_shape(dataset_name: str) -> Shape:
             "fmnist": (1, 32, 32),
             "fmnist-28": (1, 28, 28),
             "cifar": (3, 32, 32),
+            "cifar-bw": (1, 32, 32),
             "svhn": (3, 32, 32),
             "svhn-extra": (3, 32, 32),
             "celeba": (3, 64, 64),
@@ -120,10 +122,12 @@ def generate_data(dataset_name: str, n_samples: int = 1000) -> Tuple[torch.Tenso
             random_state=0,
         )
     elif tag == "2-moons":
-        data, y = datasets.make_moons(n_samples=n_samples, noise=0.1, random_state=0)
+        data, y = datasets.make_moons(
+            n_samples=n_samples, noise=0.1, random_state=0)
 
     elif tag == "circles":
-        data, y = datasets.make_circles(n_samples=n_samples, factor=0.5, noise=0.05)
+        data, y = datasets.make_circles(
+            n_samples=n_samples, factor=0.5, noise=0.05)
 
     elif tag == "aniso":
         # Anisotropicly distributed data
@@ -153,7 +157,7 @@ def generate_data(dataset_name: str, n_samples: int = 1000) -> Tuple[torch.Tenso
     return data, labels
 
 
-def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
+def get_datasets(cfg, normalize: bool, additional_transforms=[]) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Get the specified dataset.
 
@@ -174,6 +178,7 @@ def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
     # Compose image transformations
     transform = transforms.Compose(
         [
+            *additional_transforms,
             transforms.Resize(
                 size=(shape.height, shape.width),
             ),
@@ -218,7 +223,8 @@ def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
         N_train = round(N * 0.9)
         N_val = N - N_train
         lenghts = [N_train, N_val]
-        dataset_train, dataset_val = random_split(dataset_train, lengths=lenghts)
+        dataset_train, dataset_val = random_split(
+            dataset_train, lengths=lenghts)
 
     elif dataset_name == "fmnist" or dataset_name == "fmnist-28":
         if normalize:
@@ -232,11 +238,13 @@ def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
         N_train = round(N * 0.9)
         N_val = N - N_train
         lenghts = [N_train, N_val]
-        dataset_train, dataset_val = random_split(dataset_train, lengths=lenghts)
+        dataset_train, dataset_val = random_split(
+            dataset_train, lengths=lenghts)
 
     elif "celeba" in dataset_name:
         if normalize:
-            transform.transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+            transform.transforms.append(
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
 
         dataset_train = CelebA(**kwargs, split="train")
         dataset_val = CelebA(**kwargs, split="valid")
@@ -244,26 +252,52 @@ def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
 
     elif dataset_name == "cifar":
         if normalize:
-            transform.transforms.append(transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
+            transform.transforms.append(
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
         dataset_train = CIFAR10(**kwargs, train=True)
 
         N = len(dataset_train.data)
         N_train = round(N * 0.9)
         N_val = N - N_train
         lenghts = [N_train, N_val]
-        dataset_train, dataset_val = random_split(dataset_train, lengths=lenghts)
+        dataset_train, dataset_val = random_split(
+            dataset_train, lengths=lenghts)
+        dataset_test = CIFAR10(**kwargs, train=False)
+
+    elif dataset_name == "cifar-bw":
+        transform.transforms.append(
+            transforms.Grayscale(num_output_channels=1)
+        )
+
+        if normalize:
+            transform.transforms.append(
+                transforms.Normalize([0.5], [0.5]))
+        else:
+            transform.transforms.append(
+                Rescaler()
+            )
+        dataset_train = CIFAR10(**kwargs, train=True)
+
+        N = len(dataset_train.data)
+        N_train = round(N * 0.9)
+        N_val = N - N_train
+        lenghts = [N_train, N_val]
+        dataset_train, dataset_val = random_split(
+            dataset_train, lengths=lenghts)
         dataset_test = CIFAR10(**kwargs, train=False)
 
     elif "svhn" in dataset_name:
         if normalize:
-            transform.transforms.append(transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
+            transform.transforms.append(
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
 
         # Load train
         dataset_train = SVHN(**kwargs, split="train")
 
         N = len(dataset_train.data)
         lenghts = [round(N * 0.9), round(N * 0.1)]
-        dataset_train, dataset_val = random_split(dataset_train, lengths=lenghts)
+        dataset_train, dataset_val = random_split(
+            dataset_train, lengths=lenghts)
         dataset_test = SVHN(**kwargs, split="test")
 
         if dataset_name == "svhn-extra":
@@ -277,18 +311,20 @@ def get_datasets(cfg, normalize: bool) -> Tuple[Dataset, Dataset, Dataset]:
     return dataset_train, dataset_val, dataset_test
 
 
-def build_dataloader(cfg, loop: bool, normalize: bool) -> Tuple[DataLoader, DataLoader, DataLoader]:
+def build_dataloader(cfg, loop: bool, normalize: bool, augment=False, additional_transforms=[]) -> Tuple[DataLoader, DataLoader, DataLoader]:
     # Get dataset objects
-    dataset_train, dataset_val, dataset_test = get_datasets(cfg, normalize=normalize)
+    dataset_train, dataset_val, dataset_test = get_datasets(
+        cfg, normalize=normalize, additional_transforms=additional_transforms)
 
     # Build data loader
-    loader_train = _make_loader(cfg, dataset_train, loop=loop, shuffle=True)
+    loader_train = _make_loader(
+        cfg, dataset_train, loop=loop, shuffle=True, augment=augment)
     loader_val = _make_loader(cfg, dataset_val, loop=loop, shuffle=False)
     loader_test = _make_loader(cfg, dataset_test, loop=loop, shuffle=False)
     return loader_train, loader_val, loader_test
 
 
-def _make_loader(cfg, dataset: Dataset, loop: bool, shuffle: bool) -> DataLoader:
+def _make_loader(cfg, dataset: Dataset, loop: bool, shuffle: bool, augment=False) -> DataLoader:
     if loop:
         sampler = TrainingSampler(size=len(dataset))
     else:
@@ -305,6 +341,7 @@ def _make_loader(cfg, dataset: Dataset, loop: bool, shuffle: bool) -> DataLoader
         pin_memory=True,
         drop_last=False,
         worker_init_fn=worker_init_reset_seed,
+
     )
 
 
@@ -360,6 +397,8 @@ class Dist(str, Enum):
     BINOMIAL = "binomial"
     CCLNORMAL = "cclnormal"
     CCLBINOMIAL = "cclbinomail"
+    CCLMIXTURE = "cclmixture"
+    CLASSNORMAL = "classnormal"
 
 
 def get_distribution(**cfg):
@@ -376,19 +415,51 @@ def get_distribution(**cfg):
         leaf_kwargs: The kwargs for the leaves.
 
     """
-    
+
     if cfg["dist"] == Dist.NORMAL:
         leaf_type = RatNormal
-        leaf_kwargs = {"min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
+        leaf_kwargs = {
+            "min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
     elif cfg["dist"] == Dist.BINOMIAL:
         leaf_type = Binomial
         leaf_kwargs = {"total_count": 2**8 - 1}
     elif cfg["dist"] == Dist.CCLNORMAL:
         leaf_type = CCRatNormal
-        leaf_kwargs = {"min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
+        leaf_kwargs = {
+            "min_sigma": cfg["min_sigma"], "max_sigma": cfg["max_sigma"]}
     elif cfg["dist"] == Dist.CCLBINOMIAL:
         leaf_type = CCBinomial
-        leaf_kwargs = {"total_count": 2**8 - 1, "weight_decay": cfg["weight_decay"] > 0}
+        leaf_kwargs = {"total_count": 2**8 - 1,
+                       "weight_decay": cfg["weight_decay"] > 0}
+    elif cfg["dist"] == Dist.CCLMIXTURE:
+        leaf_type = CCLMixture
+        leaf_kwargs = {
+            "distributions": [CCRatNormal, CCBinomial],
+            "total_count": 2**8 - 1,
+            "weight_decay": cfg["weight_decay"] > 0,
+            "min_sigma": cfg["min_sigma"],
+            "max_sigma": cfg["max_sigma"]
+        }
+    elif cfg["dist"] == Dist.CLASSNORMAL:
+        leaf_type = ClassRatNormal
+        leaf_kwargs = {
+            "min_sigma": cfg["min_sigma"],
+            "max_sigma": cfg["max_sigma"]
+        }
     else:
         raise ValueError("dist must be either normal, cclnormal or binomial")
     return leaf_kwargs, leaf_type
+
+
+class Rescaler(torch.nn.Module):
+    """ scale by factor round scale back by factor """
+
+    def __init__(self, scale=255):
+        super().__init__()
+        self.scale = scale
+
+    def forward(self, x):
+        return (x * self.scale).round() / self.scale
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(scale={})'.format(self.scale)

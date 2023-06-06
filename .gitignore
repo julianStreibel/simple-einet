@@ -148,5 +148,15 @@ outputs/
 CCLEinet/
 Auto_Einet/
 mixing_ccleinet/
+mixing_einet/
+flow_spn/
+flow_spn_z/
+image_flow/
+class_einet/
+datasets/
+multirun/
+
+visualization/
+
 
 *.DS_Store

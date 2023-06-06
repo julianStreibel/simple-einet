@@ -685,3 +685,142 @@ class EinsumMixingLayer(AbstractLayer):
         return "num_features={}, num_sums_in={}, num_sums_out={}, num_repetitions={}".format(
             self.num_features, self.num_sums_in, self.num_sums_out, self.num_repetitions
         )
+
+
+class ClassEinsumMixingLayer(EinsumMixingLayer):
+    def __init__(
+        self,
+        num_features: int,
+        num_sums_in: int,
+        num_sums_out: int,
+        num_classes: int,
+    ):
+        super().__init__(
+            num_features,
+            num_sums_in,
+            num_sums_out
+        )
+
+        self.num_sums_in = check_valid(num_sums_in, int, 1)
+        self.num_sums_out = check_valid(num_sums_out, int, 1)
+        self.out_features = num_features
+        self.num_classes = num_classes
+
+        # Weights, such that each sumnode has its own weights
+        ws = torch.randn(
+            self.num_features,
+            self.num_sums_out,
+            self.num_sums_in,
+            self.num_classes
+        )
+        self.weights = nn.Parameter(ws)
+
+        # Necessary for sampling with evidence: Save input during forward pass.
+        self._is_input_cache_enabled = False
+        self._input_cache_left = None
+        self._input_cache_right = None
+
+    def forward(self, x):
+        # Save input if input cache is enabled
+        if self._is_input_cache_enabled:
+            self._input_cache = x.clone()
+
+        # Dimensions
+        N, D, IC, R, C = x.size()
+
+        probs_max = torch.max(x, dim=3, keepdim=True)[0]
+        probs = torch.exp(x - probs_max)
+
+        weights = self.weights
+        weights = F.softmax(weights, dim=2)
+
+        out = torch.einsum("bdosc,dosc->bdoc", probs, weights)
+        lls = torch.log(out) + probs_max.squeeze(3)
+
+        return lls
+
+    def sample(
+        self,
+        num_samples: int = None,
+        context: SamplingContext = None,
+        differentiable=False,
+    ) -> Union[SamplingContext, torch.Tensor]:
+        # Sum weights are of shape: [W, H, IC, OC, R]
+        # We now want to use `indices` to access one in_channel for each in_feature x num_sums_out block
+        # index is of size in_feature
+        weights = self.weights
+
+        in_features, num_sums_out, num_sums_in = weights.shape
+        num_samples = context.num_samples
+
+        self._check_indices_repetition(context)
+
+        if not context.is_differentiable:
+            # Index with parent indices
+            weights = weights.unsqueeze(0)  # make space for batch dim
+            weights = weights.expand(num_samples, -1, -1, -1)
+            # make space for repetition dim
+            p_idxs = context.indices_out.unsqueeze(-1).unsqueeze(-1)
+            p_idxs = p_idxs.expand(-1, -1, -1, num_sums_in)
+            weights = weights.gather(dim=2, index=p_idxs)
+            # Drop dim which was selected via parent indices
+            weights = weights.squeeze(2)
+        else:
+            # Index with parent indices
+            weights = weights.unsqueeze(0)  # make space for batch dim
+            # make space for repetition dim
+            p_idxs = context.indices_out.unsqueeze(-1)
+            # TODO: is 2 correct?
+            weights = index_one_hot(weights, index=p_idxs, dim=2)
+
+        # Check dimensions
+        assert weights.shape == (num_samples, in_features, num_sums_in)
+
+        log_weights = F.log_softmax(weights, dim=2)
+
+        # If evidence is given, adjust the weights with the likelihoods of the observed paths
+        if self._is_input_cache_enabled and self._input_cache is not None:
+            # TODO: parallelize this with torch.gather
+            for i in range(num_samples):
+                # Reweight the i-th samples weights by its likelihood values at the correct
+                # repetition
+                log_weights[i, :, :] += self._input_cache[i,
+                                                          :, :, context.indices_repetition[i]]
+
+        if not context.is_differentiable:
+            if context.is_mpe:
+                indices = log_weights.argmax(dim=3)
+            else:
+                # Create categorical distribution to sample from
+                dist = torch.distributions.Categorical(logits=log_weights)
+
+                indices = dist.sample()
+        else:
+            if context.is_mpe:
+                raise NotImplementedError
+            else:
+                indices = diff_sample_one_hot(
+                    log_weights,
+                    mode="sample",
+                    dim=2,
+                    hard=context.hard,
+                    tau=context.tau,
+                )
+
+        context.indices_out = indices
+        return context
+
+    def _check_indices_repetition(self, context: SamplingContext):
+        assert context.indices_repetition.shape[0] == context.indices_out.shape[0]
+        if self.num_repetitions > 1 and context.indices_repetition is None:
+            raise Exception(
+                f"Sum layer has multiple repetitions (num_repetitions=={self.num_repetitions}) but indices_repetition argument was None, expected a Long tensor size #samples."
+            )
+        if self.num_repetitions == 1 and context.indices_repetition is None:
+            context.indices_repetition = torch.zeros(
+                context.num_samples, dtype=torch.int, device=self.__device)
+
+    def extra_repr(self):
+        return "num_features={}, num_sums_in={}, num_sums_out={}, num_repetitions={}".format(
+            self.num_features, self.num_sums_in, self.num_sums_out, self.num_repetitions
+        )

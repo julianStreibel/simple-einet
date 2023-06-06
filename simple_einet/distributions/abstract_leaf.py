@@ -36,6 +36,7 @@ def dist_forward(distribution, x: torch.Tensor, y: torch.Tensor = None):
             x = distribution.log_prob(x)  # Shape: [n, d, oc, r]
         else:
             x = distribution.log_prob(x, y)
+
     except ValueError as e:
         print("min:", x.min())
         print("max:", x.max())
@@ -113,7 +114,7 @@ def dist_sample(distribution: dist.Distribution, context: SamplingContext = None
         elif type(distribution) == CustomNormal:
             distribution = CustomNormal(
                 mu=distribution.mu, sigma=distribution.sigma * context.temperature_leaves)
-        
+
         # class conditional distributions dont sample individual samples but treat a batch as a sample
         # this is beacause the parameters are expendet to the batch size with the wanted leave params dep. on y
         if type(distribution) == CustomCCNormal and y is not None:
@@ -122,15 +123,16 @@ def dist_sample(distribution: dist.Distribution, context: SamplingContext = None
             distribution = CustomCCNormal(
                 mu, sigma * context.temperature_leaves)
             samples = distribution.sample()
-            samples = samples.unsqueeze(1) # for compatibility
+            samples = samples.unsqueeze(1)  # for compatibility
         elif isinstance(distribution, CustomCCBinomial) and y is not None:
             probs = distribution.probs[..., y].permute(4, 0, 1, 2, 3).clone()
-            distribution = dist.Binomial(probs=probs, total_count=distribution.total_count)
+            distribution = dist.Binomial(
+                probs=probs, total_count=distribution.total_count)
             samples = distribution.sample()
-            samples = samples.unsqueeze(1) # for compatibility
+            samples = samples.unsqueeze(1)  # for compatibility
         else:
             samples = distribution.sample(sample_shape=(context.num_samples,))
-            
+
     assert (
         samples.shape[1] == 1
     ), "Something went wrong. First sample size dimension should be size 1 due to the distribution parameter dimensions. Please report this issue."

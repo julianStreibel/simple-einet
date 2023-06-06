@@ -1,14 +1,14 @@
 defaults:
   - _self_
   - experiment: null
-  - override hydra/sweeper: optuna
-  - override hydra/sweeper/sampler: tpe
+  # - override hydra/job_logging: colorlog
+  # - override hydra/hydra_logging: colorlog
 
 # Default set of configurations.
 data_dir: ???
 results_dir: ???
 lr: 0.1
-batch_size: 64
+batch_size: 128
 n_bits: 8
 num_workers: 8
 temperature_leaves: 1.0
@@ -22,16 +22,16 @@ log_interval: 10
 classification: True
 device: "cuda"
 debug: False
-S: 5
+S: 10
 I: 10
-D: 6
-M: 2
-R: 2
+M: 0
+D: 3
+R: 1
 gpu: 0
 epochs: 10
 load_and_eval: False
 cp: True
-dist: "cclbinomial"
+dist: "normal"
 precision: 16
 group_tag: ???
 tag: ???
@@ -52,3 +52,16 @@ gradient_clip_val: 0
 learn_permutations: False
 sinkhorn_tau: 1
 switch_permutation: False
+permutation_lr: 0.99
+permutation_switch_step_ratio_denominator: 8
+independent_colors: True
+shuffle_features: True
+
+num_flow_layers: 4
+num_hidden_features_flow: 64
+num_context_features_flow: None
+
+num_blocks_per_layer_flow: 4
+dropout_probability_flow: 0.01
+batch_norm_within_layers_flow: True
+batch_norm_between_layers_flow: False

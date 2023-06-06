@@ -35,7 +35,8 @@ class Binomial(AbstractLeaf):
         self.total_count = check_valid(total_count, int, lower_bound=1)
 
         # Create binomial parameters
-        self.probs = nn.Parameter(torch.randn(1, num_channels, num_features, num_leaves, num_repetitions))
+        self.probs = nn.Parameter(torch.randn(
+            1, num_channels, num_features, num_leaves, num_repetitions))
 
     def _get_base_distribution(self, context: SamplingContext = None):
         # Use sigmoid to ensure, that probs are in valid range
@@ -56,7 +57,8 @@ class CustomBinomial:
         sigma = mu * (1 - self.probs)
 
         num_samples = sample_shape[0]
-        eps = torch.randn((num_samples,) + mu.shape, dtype=mu.dtype, device=mu.device)
+        eps = torch.randn((num_samples,) + mu.shape,
+                          dtype=mu.dtype, device=mu.device)
         samples = mu.unsqueeze(0) + sigma.unsqueeze(0) * eps
         samples = samples.clip(0, self.total_count)
         return samples
@@ -88,10 +90,12 @@ class ConditionalBinomial(AbstractLeaf):
         self.cond_idxs = cond_idxs
 
         self.probs_conditioned_base = nn.Parameter(
-            0.5 + torch.rand(1, num_channels, num_features // 2, num_leaves, num_repetitions) * 0.1
+            0.5 + torch.rand(1, num_channels, num_features //
+                             2, num_leaves, num_repetitions) * 0.1
         )
         self.probs_unconditioned = nn.Parameter(
-            0.5 + torch.rand(1, num_channels, num_features // 2, num_leaves, num_repetitions) * 0.1
+            0.5 + torch.rand(1, num_channels, num_features //
+                             2, num_leaves, num_repetitions) * 0.1
         )
 
     def get_conditioned_distribution(self, x_cond: torch.Tensor):
@@ -123,7 +127,8 @@ class ConditionalBinomial(AbstractLeaf):
         # Add conditioned parameters to default parameters
         probs_cond = self.probs_conditioned_base + probs_cond
 
-        probs_unc = self.probs_unconditioned.expand(x_cond.shape[0], -1, -1, -1, -1)
+        probs_unc = self.probs_unconditioned.expand(
+            x_cond.shape[0], -1, -1, -1, -1)
         probs = torch.cat((probs_cond, probs_unc), dim=2)
         d = dist.Binomial(self.total_count, logits=probs)
         return d
@@ -169,13 +174,13 @@ class ConditionalBinomial(AbstractLeaf):
         # If parent index into out_channels are given
         if context.indices_out is not None:
             # Choose only specific samples for each feature/scope
-            samples = torch.gather(samples, dim=2, index=context.indices_out.unsqueeze(-1)).squeeze(-1)
+            samples = torch.gather(
+                samples, dim=2, index=context.indices_out.unsqueeze(-1)).squeeze(-1)
 
         return samples
 
     def _get_base_distribution(self) -> dist.Distribution:
         raise NotImplementedError("This should not happen.")
-
 
 
 class CCBinomial(AbstractLeaf):
@@ -187,7 +192,8 @@ class CCBinomial(AbstractLeaf):
         num_repetitions: int,
         total_count: int,
         num_classes: int,
-        weight_decay=False
+        weight_decay=False,
+        **kwargs
     ):
         super().__init__(
             num_features=num_features,
@@ -200,8 +206,12 @@ class CCBinomial(AbstractLeaf):
 
         # Create binomial parameters
         self._offset = torch.tensor(5.) if weight_decay else torch.tensor(0.)
-        init_params = torch.randn(num_channels, num_features, num_leaves, num_repetitions, 1) + self._offset
-        self.p = nn.Parameter(init_params.expand(-1, -1, -1, -1, num_classes))
+        # init_params = torch.randn(
+        #     num_channels, num_features, num_leaves, num_repetitions, 1) + self._offset
+        # init_params = init_params.expand(-1, -1, -1, -1, num_classes)
+        init_params = torch.randn(
+            num_channels, num_features, num_leaves, num_repetitions, num_classes)
+        self.p = nn.Parameter(init_params)
 
     @property
     def probs(self):
@@ -210,8 +220,11 @@ class CCBinomial(AbstractLeaf):
     def _get_base_distribution(self, y, context: SamplingContext = None):
         # Use sigmoid to ensure, that probs are in valid range
         if context is not None and context.is_differentiable:
-            raise NotImplementedError("differentiable CCBinomial not implemented jet.")
+            raise NotImplementedError(
+                "differentiable CCBinomial not implemented jet.")
         else:
+            probs = self.probs.sigmoid()
+
             return CustomCCBinomial(probs=self.probs.sigmoid(), total_count=self.total_count)
 
     def forward(self, x, y, marginalized_scopes: List[int]):
@@ -242,5 +255,12 @@ class CustomCCBinomial:
         self.total_count = total_count
 
     def log_prob(self, x, y):
-        probs = self.probs[..., y].permute(4, 0, 1, 2, 3)
-        return dist.Binomial(probs=probs, total_count=self.total_count).log_prob(x)
+
+        probs = self.probs[..., y]
+
+        probs = probs.permute(4, 0, 1, 2, 3)
+
+        p = dist.Binomial(
+            probs=probs, total_count=self.total_count).log_prob(x)
+
+        return p

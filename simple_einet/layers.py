@@ -59,12 +59,15 @@ class Sum(AbstractLayer):
 
         self.num_sums_in = check_valid(num_sums_in, int, 1)
         self.num_sums_out = check_valid(num_sums_out, int, 1)
-        self.dropout = nn.Parameter(torch.tensor(check_valid(dropout, float, 0.0, 1.0)), requires_grad=False)
+        self.dropout = nn.Parameter(torch.tensor(check_valid(
+            dropout, float, 0.0, 1.0)), requires_grad=False)
 
         # Weights, such that each sumnode has its own weights
-        ws = torch.randn(self.num_features, self.num_sums_in, self.num_sums_out, self.num_repetitions)
+        ws = torch.randn(self.num_features, self.num_sums_in,
+                         self.num_sums_out, self.num_repetitions)
         self.weights = nn.Parameter(ws)
-        self._bernoulli_dist = torch.distributions.Bernoulli(probs=self.dropout)
+        self._bernoulli_dist = torch.distributions.Bernoulli(
+            probs=self.dropout)
 
         self.out_shape = f"(N, {self.num_features}, {self.num_sums_out}, {self.num_repetitions})"
 
@@ -152,7 +155,8 @@ class Sum(AbstractLayer):
             assert out_channels == 1 and num_repetitions == 1, "Cannot start sampling from non-root layer."
 
             # Initialize rep indices
-            context.indices_repetition = torch.zeros(num_samples, dtype=int, device=self.__device)
+            context.indices_repetition = torch.zeros(
+                num_samples, dtype=int, device=self.__device)
 
             # Select weights, repeat n times along the last dimension
             weights = weights[:, :, [0] * num_samples, 0]  # Shape: [D, IC, N]
@@ -163,7 +167,8 @@ class Sum(AbstractLayer):
             # If this is not the root node, use the paths (out channels), specified by the parent layer
             self._check_indices_repetition(context)
 
-            tmp = torch.zeros(num_samples, in_features, in_channels, device=self.__device)
+            tmp = torch.zeros(num_samples, in_features,
+                              in_channels, device=self.__device)
             for i in range(num_samples):
                 tmp[i, :, :] = weights[
                     range(self.num_features),
@@ -183,7 +188,8 @@ class Sum(AbstractLayer):
         if self._is_input_cache_enabled and self._input_cache is not None:
             for i in range(num_samples):
                 # Reweight the i-th samples weights by its likelihood values at the correct repetition
-                log_weights[i, :, :] += self._input_cache[i, :, :, context.indices_repetition[i]]
+                log_weights[i, :, :] += self._input_cache[i,
+                                                          :, :, context.indices_repetition[i]]
 
         # If sampling context is MPE, set max weight to 1 and rest to zero, such that the maximum index will be sampled
         if context.is_mpe:
@@ -205,7 +211,8 @@ class Sum(AbstractLayer):
                 f"Sum layer has multiple repetitions (num_repetitions=={self.num_repetitions}) but indices_repetition argument was None, expected a Long tensor size #samples."
             )
         if self.num_repetitions == 1 and context.indices_repetition is None:
-            context.indices_repetition = torch.zeros(context.num_samples, dtype=int, device=self.__device)
+            context.indices_repetition = torch.zeros(
+                context.num_samples, dtype=int, device=self.__device)
 
     def extra_repr(self):
         return "num_features={}, num_sums_in={}, num_sums_out={}, dropout={}, out_shape={}".format(
@@ -236,10 +243,13 @@ class Product(AbstractLayer):
         self.cardinality = check_valid(cardinality, int, 1, in_features + 1)
 
         # Implement product as convolution
-        self._conv_weights = nn.Parameter(torch.ones(1, 1, cardinality, 1, 1), requires_grad=False)
-        self._pad = (self.cardinality - self.num_features % self.cardinality) % self.cardinality
+        self._conv_weights = nn.Parameter(torch.ones(
+            1, 1, cardinality, 1, 1), requires_grad=False)
+        self._pad = (self.cardinality - self.num_features %
+                     self.cardinality) % self.cardinality
 
-        self._out_features = np.ceil(self.num_features / self.cardinality).astype(int)
+        self._out_features = np.ceil(
+            self.num_features / self.cardinality).astype(int)
         self.out_shape = f"(N, {self._out_features}, in_channels, {self.num_repetitions})"
 
     @property
@@ -275,7 +285,8 @@ class Product(AbstractLayer):
 
         # Use convolution with 3D weight tensor filled with ones to simulate the product node
         x = x.unsqueeze(1)  # Shape: [n, 1, d, c, r]
-        result = F.conv3d(x, weight=self._conv_weights, stride=(self.cardinality, 1, 1))
+        result = F.conv3d(x, weight=self._conv_weights,
+                          stride=(self.cardinality, 1, 1))
 
         # Remove simulated channel
         result = result.squeeze(1)
@@ -299,8 +310,10 @@ class Product(AbstractLayer):
 
             if self.num_repetitions == 1:
                 # If there is only a single repetition, create new sampling context
-                context.indices_out = torch.zeros(context.num_samples, 1, dtype=int, device=self.__device)
-                context.indices_repetition = torch.zeros(context.num_samples, dtype=int, device=self.__device)
+                context.indices_out = torch.zeros(
+                    context.num_samples, 1, dtype=int, device=self.__device)
+                context.indices_repetition = torch.zeros(
+                    context.num_samples, dtype=int, device=self.__device)
                 return context
             else:
                 raise Exception(
@@ -308,7 +321,8 @@ class Product(AbstractLayer):
                 )
         else:
             # Repeat the parent indices, e.g. [0, 2, 3] -> [0, 0, 2, 2, 3, 3] depending on the cardinality
-            indices = torch.repeat_interleave(context.indices_out, repeats=self.cardinality, dim=1)
+            indices = torch.repeat_interleave(
+                context.indices_out, repeats=self.cardinality, dim=1)
 
             # Remove padding
             if self._pad:
@@ -348,7 +362,8 @@ class CrossProduct(AbstractLayer):
         self.in_channels = check_valid(in_channels, int, 1)
         cardinality = 2  # Fixed to binary graphs for now
         self.cardinality = check_valid(cardinality, int, 2, in_features + 1)
-        self._out_features = np.ceil(self.num_features / self.cardinality).astype(int)
+        self._out_features = np.ceil(
+            self.num_features / self.cardinality).astype(int)
         self._pad = 0
 
         # Collect scopes for each product child
@@ -373,7 +388,8 @@ class CrossProduct(AbstractLayer):
 
         # Create index map from flattened to coordinates (only needed in sampling)
         self.unraveled_channel_indices = nn.Parameter(
-            torch.tensor([(i, j) for i in range(self.in_channels) for j in range(self.in_channels)]),
+            torch.tensor([(i, j) for i in range(self.in_channels)
+                         for j in range(self.in_channels)]),
             requires_grad=False,
         )
 
@@ -397,10 +413,12 @@ class CrossProduct(AbstractLayer):
         # Check if padding to next power of 2 is necessary
         if self.num_features != x.shape[1]:
             # Compute necessary padding to the next power of 2
-            self._pad = 2 ** np.ceil(np.log2(x.shape[1])).astype(np.int) - x.shape[1]
+            self._pad = 2 ** np.ceil(np.log2(x.shape[1])
+                                     ).astype(np.int) - x.shape[1]
 
             # Pad marginalized node
-            x = F.pad(x, pad=[0, 0, 0, 0, 0, self._pad], mode="constant", value=0.0)
+            x = F.pad(x, pad=[0, 0, 0, 0, 0, self._pad],
+                      mode="constant", value=0.0)
 
         # Dimensions
         n, d, c, r = x.size()
@@ -438,8 +456,10 @@ class CrossProduct(AbstractLayer):
         if context.is_root:
             if self.num_repetitions == 1:
                 # If there is only a single repetition, create new sampling context
-                context.indices_out = torch.zeros(context.num_samples, 1, dtype=int, device=self.__device)
-                context.indices_repetition = torch.zeros(context.num_samples, dtype=int, device=self.__device)
+                context.indices_out = torch.zeros(
+                    context.num_samples, 1, dtype=int, device=self.__device)
+                context.indices_repetition = torch.zeros(
+                    context.num_samples, dtype=int, device=self.__device)
                 return context
             else:
                 raise Exception(

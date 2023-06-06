@@ -63,6 +63,8 @@ class MixingCCLEinet(Einet):
             num_repetitions=self.config.num_repetitions,
             base_leaf=base_leaf,
             independent_colors=True,
+            learn_permutations=self.config.learn_permutations,
+            tau=self.config.sinkhorn_tau
         )
 
     def _forward_layers(self, x):

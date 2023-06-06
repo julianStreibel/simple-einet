@@ -141,7 +141,9 @@ class CCRatNormal(AbstractLeaf):
         max_sigma: float = 1.0,
         min_mean: float = None,
         max_mean: float = None,
-        num_classes: int = None
+        num_classes: int = None,
+        conditional=True,
+        **kwargs
     ):
         """Creat a class conditioned gaussian layer.
 
@@ -159,6 +161,7 @@ class CCRatNormal(AbstractLeaf):
         )
 
         self.num_classes = num_classes
+        self.conditional = conditional
 
         # Create gaussian means and stds
         self.means = nn.Parameter(torch.randn(
@@ -193,7 +196,6 @@ class CCRatNormal(AbstractLeaf):
             mean_range = self.max_mean - self.min_mean
             means = torch.sigmoid(self.means) * mean_range + self.min_mean
 
-        # d = dist.Normal(means, sigma)
         d = CustomCCNormal(means, sigma)
         return d
 
@@ -227,21 +229,134 @@ class CustomCCNormal:
         self.sigma = sigma
 
     def sample(self):
-        eps = torch.randn(self.mu.shape, dtype=self.mu.dtype, device=self.mu.device)
+        eps = torch.randn(self.mu.shape, dtype=self.mu.dtype,
+                          device=self.mu.device)
         samples = self.mu + self.sigma * eps
         return samples
-
 
     def log_prob(self, x, y):
 
         # taking mu and sigma for the right class
         mu = self.mu[..., y].permute(4, 0, 1, 2, 3)
         sigma = self.sigma[..., y].permute(4, 0, 1, 2, 3)
-        log_class_conditional_likelihood = dist.Normal(
-            mu, sigma).log_prob(x)
+        log_class_conditional_likelihood = dist.Normal(mu, sigma).log_prob(x)
 
         assert log_class_conditional_likelihood.shape == (
             x.shape[0], *self.mu.shape[:-1]
         )
+
+        return log_class_conditional_likelihood
+
+
+class ClassRatNormal(AbstractLeaf):
+    """Implementation as in RAT-SPN but conditioned on the class feature """
+
+    def __init__(
+        self,
+        num_features: int,
+        num_leaves: int,
+        num_channels: int,
+        num_repetitions: int = 1,
+        min_sigma: float = 0.1,
+        max_sigma: float = 1.0,
+        min_mean: float = None,
+        max_mean: float = None,
+        num_classes: int = None,
+        conditional=True,
+        **kwargs
+    ):
+        """Creat a class conditioned gaussian layer.
+
+        Args:
+            out_channels: Number of parallel representations for each input feature.
+            in_features: Number of input features.
+            num_classes: number of classes in the data
+
+        """
+        super().__init__(
+            num_features=num_features,
+            num_leaves=num_leaves,
+            num_repetitions=num_repetitions,
+            num_channels=num_channels,
+        )
+
+        self.num_classes = num_classes
+        self.conditional = conditional
+
+        # Create gaussian means and stds
+        self.means = nn.Parameter(torch.randn(
+            1, num_channels, num_features, num_leaves, num_repetitions, num_classes))
+
+        if min_sigma is not None and max_sigma is not None:
+            # Init from normal
+            self.stds = nn.Parameter(torch.randn(
+                1, num_channels, num_features, num_leaves, num_repetitions, num_classes))
+        else:
+            # Init uniform between 0 and 1
+            self.stds = nn.Parameter(torch.rand(
+                1, num_channels, num_features, num_leaves, num_repetitions, num_classes))
+
+        self.min_sigma = check_valid(min_sigma, float, 0.0, max_sigma)
+        self.max_sigma = check_valid(max_sigma, float, min_sigma)
+        self.min_mean = check_valid(
+            min_mean, float, upper_bound=max_mean, allow_none=True)
+        self.max_mean = check_valid(max_mean, float, min_mean, allow_none=True)
+
+    def _get_base_distribution(self, context: SamplingContext = None) -> "CustomCCNormal":
+        if self.min_sigma < self.max_sigma:
+            sigma_ratio = torch.sigmoid(self.stds)
+            sigma = self.min_sigma + \
+                (self.max_sigma - self.min_sigma) * sigma_ratio
+        else:
+            sigma = 1.0
+
+        means = self.means
+        if self.max_mean:
+            assert self.min_mean is not None
+            mean_range = self.max_mean - self.min_mean
+            means = torch.sigmoid(self.means) * mean_range + self.min_mean
+
+        d = CustomClassNormal(means, sigma)
+        return d
+
+    def forward(self, x, marginalized_scopes: List[int]):
+        # Forward through base distribution
+        d = self._get_base_distribution()
+        x = dist_forward(d, x)
+
+        x = self._marginalize_input(x, marginalized_scopes)
+
+        return x
+
+    def sample(self, y: torch.Tensor, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:
+        """
+        Perform sampling, given indices from the parent layer that indicate which of the multiple representations
+        for each input shall be used.
+        """
+        d = self._get_base_distribution()
+        samples = dist_sample(distribution=d, context=context, y=y)
+        return samples
+
+    def extra_repr(self):
+        return f"num_features={self.num_features}, num_leaves={self.num_leaves}, num_classes={self.num_classes}, out_shape={self.out_shape}"
+
+
+class CustomClassNormal:
+    """ Class Normal class """
+
+    def __init__(self, mu: torch.Tensor, sigma: torch.Tensor):
+        self.mu = mu
+        self.sigma = sigma
+
+    def sample(self):
+        eps = torch.randn(self.mu.shape, dtype=self.mu.dtype,
+                          device=self.mu.device)
+        samples = self.mu + self.sigma * eps
+        return samples
+
+    def log_prob(self, x):
+
+        log_class_conditional_likelihood = dist.Normal(
+            self.mu, self.sigma).log_prob(x)
 
         return log_class_conditional_likelihood

@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 import torch.utils.data
 from pytorch_lightning import seed_everything
 from pytorch_lightning.callbacks import StochasticWeightAveraging, RichProgressBar
+import torchvision.transforms as transforms
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.utilities.model_summary import (
     ModelSummary,
@@ -26,6 +27,19 @@ from simple_einet.data import build_dataloader
 logger = logging.getLogger(__name__)
 
 
+class AddGaussianNoise(torch.nn.Module):
+    def __init__(self, mean=0., std=0.1):
+        super().__init__()
+        self.std = std
+        self.mean = mean
+
+    def forward(self, x):
+        return x + torch.randn(x.shape) * self.std + self.mean
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+
 @hydra.main(version_base=None, config_path="./conf", config_name="mixing_ccleinet_config")
 def main(cfg: DictConfig):
     preprocess_cfg(cfg)
@@ -41,9 +55,16 @@ def main(cfg: DictConfig):
         os.environ["WANDB_MODE"] = "offline"
 
     # Create dataloader
+    additional_transforms = [
+        transforms.ToTensor(),
+        transforms.RandomApply([
+            AddGaussianNoise(0, std=cfg.noise_std),
+        ], p=0.5),
+        transforms.ToPILImage()
+    ]
     normalize = cfg.dist == Dist.NORMAL
     train_loader, val_loader, test_loader = build_dataloader(
-        cfg=cfg, loop=False, normalize=normalize
+        cfg=cfg, loop=False, normalize=normalize, additional_transforms=additional_transforms
     )
 
     cfg.num_steps_per_epoch = len(train_loader)
@@ -63,6 +84,7 @@ def main(cfg: DictConfig):
     # Create callbacks
     logger_wandb = WandbLogger(name=cfg.tag, project="mixing_ccleinet", group=cfg.group_tag,
                                offline=not cfg.wandb)
+    logger_wandb.watch(model, log="all")
 
     # Store number of model parameters
     summary = ModelSummary(model, max_depth=-1)
@@ -113,7 +135,8 @@ def main(cfg: DictConfig):
         precision=cfg.precision,
         fast_dev_run=cfg.debug,
         profiler=cfg.profiler,
-        auto_lr_find=True
+        auto_lr_find=True,
+        gradient_clip_val=cfg.gradient_clip_val
     )
 
     if not cfg.load_and_eval:

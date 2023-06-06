@@ -28,19 +28,16 @@ parameters:
     max: 10
     min: 3
     distribution: int_uniform
-  sum_dropout:
-    max: 0.8
-    min: 0.0
+  gradient_clip_val:
+    max: 1
+    min: 0
     distribution: uniform
-  dist:
-    values:
-      - "cclnormal"
-      - "cclbinomial"
-    distribution: categorical
-  dist:
-  classification:
-    - False
-  distribution: categorical
+  mixup:
+    value: true
+  mixup_alpha:
+    max: 99
+    min: 0.01
+  
 command:
   - ${env}
   - python

@@ -8,6 +8,7 @@ from torch import nn
 from simple_einet.distributions import CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer
 from simple_einet.einsum_layer_prod_dropout import EinsumLayerProdDropout
+from simple_einet.einsum_max_layer import EinsumMaxLayer
 from simple_einet.utils import SamplingContext, provide_evidence
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.factorized_leaf_layer import CCLFactorizedLeaf
@@ -59,6 +60,8 @@ class CCLEinet(Einet):
             num_features_out=num_features_out,
             num_repetitions=self.config.num_repetitions,
             base_leaf=base_leaf,
+            learn_permutations=self.config.learn_permutations,
+            tau=self.config.sinkhorn_tau
         )
 
     def _build(self):
@@ -83,16 +86,24 @@ class CCLEinet(Einet):
                 _sum_dropout = 0.
 
             in_features = 2**i
-
-            layer = EinsumLayerProdDropout(
-                num_features=in_features,
-                num_sums_in=_num_sums_in,
-                num_sums_out=self.config.num_sums,
-                num_repetitions=self.config.num_repetitions,
-                dropout=self.config.dropout,
-                sum_dropout=_sum_dropout
-            )
-
+            if self.config.cross_product:
+                layer = EinsumLayerProdDropout(  # EinsumMaxLayer(
+                    num_features=in_features,
+                    num_sums_in=_num_sums_in,
+                    num_sums_out=self.config.num_sums,
+                    num_repetitions=self.config.num_repetitions,
+                    dropout=self.config.dropout,
+                    sum_dropout=_sum_dropout
+                )
+            else:
+                layer = EinsumMaxLayer(
+                    num_features=in_features,
+                    num_sums_in=_num_sums_in,
+                    num_sums_out=self.config.num_sums,
+                    num_repetitions=self.config.num_repetitions,
+                    dropout=self.config.dropout,
+                    sum_dropout=_sum_dropout
+                )
             einsum_layers.append(layer)
 
         # self._rep_shuffle = ShufflePerRepetitionLayer(self.config.num_repetitions, )
