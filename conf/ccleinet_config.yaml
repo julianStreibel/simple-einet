@@ -57,3 +57,6 @@ sinkhorn_tau: 1
 switch_permutation: False
 independent_colors: True
 shuffle_features: True
+
+mixing_depth: 0
+num_hidden_mixtures: None

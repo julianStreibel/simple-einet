@@ -155,6 +155,7 @@ image_flow/
 class_einet/
 datasets/
 multirun/
+explicit_mixing_einet/
 
 visualization/
 
