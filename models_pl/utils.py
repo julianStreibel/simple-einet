@@ -71,7 +71,8 @@ def make_einet(cfg, num_classes: int = 1, einet_class=Einet, num_features_multip
             independent_colors=cfg.independent_colors,
             shuffle_features=cfg.shuffle_features,
             mixing_depth=cfg.mixing_depth,
-            num_hidden_mixtures=cfg.num_hidden_mixtures
+            num_hidden_mixtures=cfg.num_hidden_mixtures,
+            weight_temperature=cfg.weight_temperature
         )
     return einet_class(config)
 

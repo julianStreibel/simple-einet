@@ -26,6 +26,8 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.explicit_mixing_einet import ExplicitMixingEinet
 from simple_einet.distributions.binomial import Binomial
+from simple_einet.em_optimizer import EmOptimizer
+
 from models_pl.utils import make_einet, DATALOADER_ID_TO_SET_NAME
 from models_pl.litmodel import LitModel
 
@@ -148,7 +150,11 @@ class SpnExplicitMixingEinet(LitModel):
             data, labels, sinkhorn_tau=self.sinkhorn_tau)  # [N]
 
         marginal = self.spn(data, sinkhorn_tau=self.sinkhorn_tau)
-        return - (joint - marginal).mean()
+
+        loss = (joint - marginal).mean()
+        if not self.cfg.use_em:
+            loss = - loss
+        return loss
 
     def _get_accuracy(self, batch, valuation=False):
         data, labels = batch
@@ -186,17 +192,24 @@ class SpnExplicitMixingEinet(LitModel):
 
         # weight decay on p of binomials
         param_list = [
-            {"params": self.spn.einsum_layers.parameters()},
-            {"params": self.spn.leaf.base_leaf.parameters(
-            ), "weight_decay": self.cfg.weight_decay}
+            {"params": self.spn.einsum_layers.parameters(), "is_leaf": False},
+            {
+                "params": self.spn.leaf.base_leaf.parameters(),
+                "weight_decay": self.cfg.weight_decay,
+                "is_leaf": True
+            }
         ]
         if self.cfg.learn_permutations:
             param_list += [{"params": self.spn.leaf.permutation_layer.parameters(),
                             "lr": self.cfg.permutation_lr}]
         if self.cfg.R > 1:
-            param_list += [{"params": self.spn.mixing.parameters()}]
+            param_list += [{"params": self.spn.mixing.parameters(),
+                            "is_leaf": False}]
+        if self.cfg.use_em:
+            optimizer = EmOptimizer(param_list, lr=self.cfg.lr)
+        else:
+            optimizer = torch.optim.Adam(param_list, lr=self.cfg.lr)
 
-        optimizer = torch.optim.Adam(param_list, lr=self.cfg.lr)
         # optimizer = torch.optim.SGD(param_list, lr=self.cfg.lr)
 
         # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(

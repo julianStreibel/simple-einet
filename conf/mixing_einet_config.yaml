@@ -59,3 +59,5 @@ independent_colors: True
 shuffle_features: True
 mixing_depth: 1
 num_hidden_mixtures: None
+use_em: False
+weight_temperature: 1.

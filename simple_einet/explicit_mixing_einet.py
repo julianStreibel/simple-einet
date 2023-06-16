@@ -205,7 +205,7 @@ class ExplicitMixingEinet(Einet):
         )
 
         return FactorizedLeafPlusCategorical(
-            num_features=base_leaf.out_features,
+            num_features=self.config.num_features,
             num_features_out=num_features_out,
             num_repetitions=self.config.num_repetitions,
             num_mixes=self.config.num_mixes,

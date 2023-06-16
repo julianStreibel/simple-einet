@@ -94,7 +94,6 @@ class MixingEinet(Einet):
         """
         # Forward to inner product and sum layers
         for layer in self.einsum_layers:
-
             x = layer(x)
         return x
 
@@ -136,7 +135,9 @@ class MixingEinet(Einet):
                     num_repetitions=self.config.num_repetitions,
                     dropout=self.config.dropout,
                     mixing_depth=self.config.mixing_depth,
-                    num_hidden_mixtures=self.config.num_hidden_mixtures
+                    num_hidden_mixtures=self.config.num_hidden_mixtures,
+                    use_em=self.config.use_em,
+                    weight_temperature=self.config.weight_temperature
                 )
             else:
                 if self.config.log_weights:
@@ -201,7 +202,7 @@ class MixingEinet(Einet):
         )
 
         return FactorizedLeaf(
-            num_features=base_leaf.out_features,
+            num_features=self.config.num_features,
             num_features_out=num_features_out,
             num_repetitions=self.config.num_repetitions,
             num_mixes=self.config.num_mixes,

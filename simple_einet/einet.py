@@ -57,6 +57,10 @@ class EinetConfig:
     shuffle_features: bool = True
     mixing_depth: int = 1
     num_hidden_mixtures: int = None
+    use_em: bool = False
+    em_frequency: int = 1
+    em_stepsize: float = 0.05
+    weight_temperature: float = 1.
 
     def assert_valid(self):
         """Check whether the configuration is valid."""
@@ -82,10 +86,11 @@ class EinetConfig:
         self.shuffle_features = self.shuffle_features
         self.mixing_depth = self.mixing_depth
         self.num_hidden_mixtures = self.num_hidden_mixtures
-
-        assert isinstance(self.leaf_type, type) and issubclass(
-            self.leaf_type, AbstractLeaf
-        ), f"Parameter EinetConfig.leaf_base_class must be a subclass type of Leaf but was {self.leaf_type}."
+        self.em_frequency = check_valid(self.em_frequency, int, 1)
+        self.em_stepsize = check_valid(self.em_stepsize, float, 0.0)
+        assert self.leaf_type is not None, "EinetConfig.leaf_type parameter was not set!"
+        self.weight_temperature = check_valid(
+            self.weight_temperature, float, -100000000., 100000000.)
 
         if self.independent_colors:
             assert (
@@ -132,6 +137,24 @@ class Einet(nn.Module):
 
         # Initialize weights
         self._init_weights()
+
+        # Set em counter
+        self._em_counter = 0
+
+    # def em_update(self):
+    #     # Increase counter
+    #     self._em_counter += 1
+
+    #     # If counter == update frequency
+    #     if self._em_counter == self.config.em_frequency:
+
+    #         # Reset counter
+    #         self._em_counter = 0
+
+    #         # Do an em step
+    #         self.leaf.base_leaf.em_update(stepsize=self.config.em_stepsize)
+    #         for layer in self.einsum_layers:
+    #             layer.em_update(stepsize=self.config.em_stepsize)
 
     def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None) -> torch.Tensor:
         """

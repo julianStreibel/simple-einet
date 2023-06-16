@@ -20,6 +20,7 @@ from torchvision.transforms.functional import InterpolationMode
 from simple_einet.distributions import RatNormal, CCRatNormal, ClassRatNormal
 from simple_einet.distributions.binomial import Binomial, CCBinomial
 from simple_einet.distributions.mixture import CCLMixture
+from simple_einet.distributions.exponential_family import NormalArray, BinomialArray
 
 
 @dataclass
@@ -399,6 +400,8 @@ class Dist(str, Enum):
     CCLBINOMIAL = "cclbinomail"
     CCLMIXTURE = "cclmixture"
     CLASSNORMAL = "classnormal"
+    NORMALARRAY = "normalArray"
+    BINOMIALARRAY = "binomialArray"
 
 
 def get_distribution(**cfg):
@@ -445,6 +448,17 @@ def get_distribution(**cfg):
         leaf_kwargs = {
             "min_sigma": cfg["min_sigma"],
             "max_sigma": cfg["max_sigma"]
+        }
+    elif cfg["dist"] == Dist.NORMALARRAY:
+        leaf_type = NormalArray
+        leaf_kwargs = {
+            "min_sigma": cfg["min_sigma"],
+            "max_sigma": cfg["max_sigma"]
+        }
+    elif cfg["dist"] == Dist.BINOMIALARRAY:
+        leaf_type = BinomialArray
+        leaf_kwargs = {
+            "total_count": 2**8 - 1
         }
     else:
         raise ValueError("dist must be either normal, cclnormal or binomial")

@@ -22,7 +22,9 @@ class MixingEinsumLayer(AbstractLayer):
         dropout: float = 0.0,
         sum_dropout: float = 0.0,
         mixing_depth: int = 1,
-        num_hidden_mixtures: int = None
+        num_hidden_mixtures: int = None,
+        use_em=False,
+        weight_temperature=1
     ):
         super().__init__(num_features, num_repetitions=num_repetitions)
 
@@ -37,6 +39,8 @@ class MixingEinsumLayer(AbstractLayer):
             self.num_features / self.cardinality).astype(int)
         self.mixing_depth = mixing_depth
         self.num_hidden_mixtures = num_mixtures_out if num_hidden_mixtures is None else num_hidden_mixtures
+        self.use_em = use_em
+        self.weight_temperature = weight_temperature
 
         mixing_weights_list = list()
         for mixing_i in range(mixing_depth):
@@ -53,7 +57,6 @@ class MixingEinsumLayer(AbstractLayer):
             else:
                 num_m_out = self.num_mixtures_out
                 num_m_in = self.num_mixtures_in
-
             mixing_weights = torch.randn(
                 self.num_features_out,
                 self.num_sums_out,
@@ -124,10 +127,12 @@ class MixingEinsumLayer(AbstractLayer):
 
         # Project weights into valid space
         einsum_weights = self.einsum_weights
-        einsum_weights = einsum_weights.view(
-            D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, -1)
-        einsum_weights = F.softmax(einsum_weights, dim=-1)
-        einsum_weights = einsum_weights.view(self.einsum_weights.shape)
+        if not self.use_em:
+            einsum_weights = einsum_weights.view(
+                D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, -1)
+            einsum_weights = F.softmax(
+                einsum_weights/self.weight_temperature, dim=-1)
+            einsum_weights = einsum_weights.view(self.einsum_weights.shape)
 
         # Einsum operation for sum(product(x))
         # n: batch, i: left-channels, j: right-channels, d:features, o: output-channels, m: mixtures, r: repetitions
@@ -136,7 +141,7 @@ class MixingEinsumLayer(AbstractLayer):
 
         # LogEinsumExp trick, re-add the max
         prob = torch.log(prob) + left_max + right_max
-
+        identity = prob
         # Save input if input cache is enabled
         if self._is_input_cache_enabled:
             self._input_cache_left = left
@@ -163,7 +168,9 @@ class MixingEinsumLayer(AbstractLayer):
 
                 mixing_weights = mixing_weights + ninf
 
-            mixing_weights = F.softmax(mixing_weights, dim=-1)
+            if not self.use_em:
+                mixing_weights = F.softmax(
+                    mixing_weights/self.weight_temperature, dim=-1)
 
             probs_max = torch.max(prob, dim=3, keepdim=True)[0]
             probs = torch.exp(prob - probs_max)
@@ -171,6 +178,11 @@ class MixingEinsumLayer(AbstractLayer):
             # n: batch, d: features, s: sums,  i: mixtures in, o: mixtures out, r: repetitions
             out = torch.einsum("ndsir,dsori->ndsor", probs, mixing_weights)
             prob = torch.log(out) + probs_max
+
+        # skip connections
+        if identity.shape == prob.shape:
+            prob = torch.stack((prob, identity), -1)
+            prob = torch.logsumexp(prob, dim=-1) - np.log(2)
 
         return prob
 
@@ -198,3 +210,47 @@ class MixingEinsumLayer(AbstractLayer):
             self.einsum_weights.shape,
             (self.mixing_depth, *self.mixing_weights_list[0].shape),
         )
+
+#     def em_purge(self):
+#         """Discard em statistics."""
+#         em_purge(self.einsum_weights)
+#         for mixing_weights in self.mixing_weights_list:
+#             em_purge(mixing_weights)
+
+#     def em_update(self, stepsize: float):
+#         if not self.use_em:
+#             raise AssertionError("em_update called while _use_em==False.")
+#         em_update(
+#             self.einsum_weights, stepsize=stepsize, normalization_dims=self.normalization_dims
+#         )
+#         for mixing_weights in self.mixing_weights_list:
+#             em_update(
+#                 mixing_weights, stepsize=stepsize, normalization_dims=self.normalization_dims
+#             )
+
+
+# def em_purge(weights: torch.Tensor):
+#     """Discard em statistics."""
+#     weights.grad = None
+
+
+# def em_update(weights, stepsize, normalization_dims):
+#     """
+#     Source: Mostly taken/adapted from the official EinsumNetworks implementation.
+
+#     Do an EM update. If the setting is online EM (online_em_stepsize is not None), then this function does nothing,
+#     since updates are triggered automatically. Thus, leave the private parameter _triggered alone.
+
+#     :return: None
+#     """
+
+#     with torch.no_grad():
+#         n = weights.grad * weights.data
+
+#         p = torch.clamp(n, 1e-16)
+#         p = p / (p.sum(normalization_dims, keepdim=True))
+#         weights.data = (1.0 - stepsize) * weights + stepsize * p
+
+#         weights.data = torch.clamp(weights, 1e-16)
+#         weights.data = weights / (weights.sum(normalization_dims, keepdim=True))
+#         weights.grad = None

@@ -100,21 +100,15 @@ class FactorizedLeaf(AbstractLayer):
                 self.num_repetitions
             )
 
-        x = x.view(
-            x.shape[0],  # b
-            x.shape[1],  # f
-            x.shape[2],  # s
-            max(1, self.num_mixes),  # m
-            self.num_repetitions  # r
-        )
-
         if self.learn_permutations:
             t = tau if tau is not None else self.tau
             x = self.permutation_layer(x, t)
 
+        # breakpoint()
         # Merge scopes by naive factorization
         x = torch.einsum("bicmr,iomr->bocmr", x, self.scopes)
 
+        # breakpoint()
         if self.num_mixes == 0:
             x = x.squeeze(3)
             assert x.shape == (
@@ -131,6 +125,7 @@ class FactorizedLeaf(AbstractLayer):
                 self.num_mixes,
                 self.num_repetitions,
             )
+
         return x
 
     def sample(self, num_samples: int = None, context: SamplingContext = None) -> torch.Tensor:

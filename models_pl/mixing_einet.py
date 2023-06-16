@@ -26,6 +26,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.mixing_einet import MixingEinet
 from simple_einet.distributions.binomial import Binomial
+from simple_einet.em_optimizer import EmOptimizer
 from models_pl.utils import make_einet, DATALOADER_ID_TO_SET_NAME
 from models_pl.litmodel import LitModel
 
@@ -169,16 +170,19 @@ class SpnMixingEinet(LitModel):
             self.val_confusion_matrix = None
 
         ent_of_posterior = self.entropy(ll_y_g_x)
-        ent_of_joint = self.entropy(ll_x_and_y)
         self.log("Entropy of posterior", ent_of_posterior, prog_bar=True)
-        self.log("Entropy of joint", ent_of_joint, prog_bar=True)
 
         accuracy = (labels == pred_labels).sum() / ll_y_g_x.shape[0]
         if self.cfg.tau != 0.0:
             t = self.tau
         else:
             t = 0
+
+        if self.cfg.use_em:
+            loss = -loss
+
         loss = loss - t * ent_of_posterior
+
         return loss, accuracy
 
     def on_train_epoch_end(self):
@@ -190,17 +194,22 @@ class SpnMixingEinet(LitModel):
 
         # weight decay on p of binomials
         param_list = [
-            {"params": self.spn.einsum_layers.parameters()},
+            {"params": self.spn.einsum_layers.parameters(), "is_leaf": False},
             {"params": self.spn.leaf.base_leaf.parameters(
-            ), "weight_decay": self.cfg.weight_decay}
+            ), "weight_decay": self.cfg.weight_decay, "is_leaf": True}
         ]
         if self.cfg.learn_permutations:
             param_list += [{"params": self.spn.leaf.permutation_layer.parameters(),
                             "lr": self.cfg.permutation_lr}]
         if self.cfg.R > 1:
-            param_list += [{"params": self.spn.mixing.parameters()}]
+            param_list += [{"params": self.spn.mixing.parameters(),
+                            "is_leaf": False}]
 
-        optimizer = torch.optim.Adam(param_list, lr=self.cfg.lr)
+        if self.cfg.use_em:
+            optimizer = EmOptimizer(param_list, lr=self.cfg.lr)
+        else:
+            optimizer = torch.optim.Adam(param_list, lr=self.cfg.lr)
+
         # optimizer = torch.optim.SGD(param_list, lr=self.cfg.lr)
 
         # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
