@@ -98,7 +98,15 @@ class MixingEinsumLayer(AbstractLayer):
 
         self.out_shape = f"(N, {self.num_features_out}, {self.num_sums_out}, {self.num_mixtures_out}, {self.num_repetitions})"
 
-    def forward(self, x):
+    def project_params(self, params):
+        return params
+        # return params.sigmoid() * 5
+
+    def forward(self, x, weight_temperature: float = None):
+        if weight_temperature is not None:
+            self.weight_temperature_backup = self.weight_temperature
+            self.weight_temperature = weight_temperature
+
         # Apply dropout: remove random sum component
         if self.dropout > 0.0 and self.training:
             dropout_indices = self._prod_bernoulli_dist.sample(x.shape).bool()
@@ -127,6 +135,7 @@ class MixingEinsumLayer(AbstractLayer):
 
         # Project weights into valid space
         einsum_weights = self.einsum_weights
+        einsum_weights = self.project_params(einsum_weights)
         if not self.use_em:
             einsum_weights = einsum_weights.view(
                 D_out, self.num_sums_out, self.num_mixtures_in, self.num_repetitions, -1)
@@ -169,6 +178,7 @@ class MixingEinsumLayer(AbstractLayer):
                 mixing_weights = mixing_weights + ninf
 
             if not self.use_em:
+                mixing_weights = self.project_params(mixing_weights)
                 mixing_weights = F.softmax(
                     mixing_weights/self.weight_temperature, dim=-1)
 
@@ -183,6 +193,9 @@ class MixingEinsumLayer(AbstractLayer):
         if identity.shape == prob.shape:
             prob = torch.stack((prob, identity), -1)
             prob = torch.logsumexp(prob, dim=-1) - np.log(2)
+
+        if weight_temperature is not None:
+            self.weight_temperature = self.weight_temperature_backup
 
         return prob
 

@@ -61,3 +61,5 @@ mixing_depth: 1
 num_hidden_mixtures: None
 use_em: False
 weight_temperature: 1.
+weight_temperature_decay: 0.99
+weight_temperature_min: 1.

@@ -27,7 +27,7 @@ from simple_einet.einet import EinetConfig, Einet
 from simple_einet.mixing_einet import MixingEinet
 from simple_einet.distributions.binomial import Binomial
 from simple_einet.em_optimizer import EmOptimizer
-from models_pl.utils import make_einet, DATALOADER_ID_TO_SET_NAME
+from models_pl.utils import make_einet, DATALOADER_ID_TO_SET_NAME, log_weight_distribution_per_layer
 from models_pl.litmodel import LitModel
 
 from sklearn.metrics import confusion_matrix
@@ -56,6 +56,7 @@ class SpnMixingEinet(LitModel):
         self.tau = self.cfg.tau
         self.sinkhorn_tau = self.cfg.sinkhorn_tau
         self.train_step = 0
+        self.weight_temperature = self.cfg.weight_temperature
 
     def switch(self, training_permutation=None):
         if training_permutation is not None:
@@ -82,10 +83,11 @@ class SpnMixingEinet(LitModel):
     def training_step(self, train_batch, batch_idx):
         if self.cfg.learn_permutations and self.cfg.switch_permutation and batch_idx in self.swith_points:
             self.switch()
-        loss, accuracy = self._get_cross_entropy_and_accuracy(train_batch)
+        loss, accuracy = self._get_cross_entropy_and_accuracy(
+            train_batch, training=True)
         self.log("Train/accuracy", accuracy, prog_bar=True)
         self.log("Train/loss", loss)
-        # if self.cfg.tau_decay != 1:
+        self.schedule_weight_temerature()
         if self.cfg.learn_permutations:
             self.schedule_sinkhorn_tau()
         if self.tau != 0.0:
@@ -114,6 +116,16 @@ class SpnMixingEinet(LitModel):
             (0.5*np.cos(self.train_step*10/np.pi/steps)+0.5) + min_sinkhorn_tau
         self.log("Sinkhorn Tau", self.sinkhorn_tau, prog_bar=True)
 
+    def schedule_weight_temerature(self):
+        T = self.cfg.num_steps_per_epoch*self.cfg.epochs
+        E = self.cfg.weight_temperature_min
+        self.weight_temperature = (
+            np.log(-self.train_step + T + 1) *
+            (self.cfg.weight_temperature - E) / np.log(T + 1)
+        ) + E
+
+        self.log("Weight Temerature", self.weight_temperature)
+
     def schedule_tau(self):
         max_tau = self.cfg.tau
         min_tau = 0.1
@@ -131,7 +143,7 @@ class SpnMixingEinet(LitModel):
         self.log("Entropy Tau", self.tau, prog_bar=True)
 
     def _get_cross_entropy_and_accuracy(
-        self, batch, valuation=False
+        self, batch, valuation=False, training=False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute cross entropy loss and accuracy of batch.
@@ -144,7 +156,10 @@ class SpnMixingEinet(LitModel):
         data, labels = batch
         data = self.preprocess(data)
         # logp(x | y)
-        ll_x_g_y = self.spn(data, sinkhorn_tau=self.sinkhorn_tau)  # [N, C]
+        ll_x_g_y = self.spn(
+            data,
+            sinkhorn_tau=self.sinkhorn_tau,
+            weight_temperature=self.weight_temperature if training else 1)  # [N, C]
 
         # logp(y | x) = logp(x, y) - logp(x)
         #             = logp(x | y) + logp(y) - logp(x)
@@ -184,6 +199,9 @@ class SpnMixingEinet(LitModel):
         loss = loss - t * ent_of_posterior
 
         return loss, accuracy
+
+    def on_train_epoch_start(self):
+        log_weight_distribution_per_layer(self.spn)
 
     def on_train_epoch_end(self):
         self.logger.log_image(key="confusion", images=[

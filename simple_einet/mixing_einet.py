@@ -31,7 +31,12 @@ class MixingEinet(Einet):
         """
         super().__init__(config)
 
-    def forward(self, x: torch.Tensor, marginalization_mask: torch.Tensor = None, sinkhorn_tau=None) -> torch.Tensor:
+    def forward(
+            self,
+            x: torch.Tensor,
+            marginalization_mask: torch.Tensor = None,
+            sinkhorn_tau=None,
+            weight_temperature=None) -> torch.Tensor:
         """
         Inference pass for the Einet model.
 
@@ -56,7 +61,7 @@ class MixingEinet(Einet):
         x = self.leaf(x, marginalization_mask, tau=sinkhorn_tau)
 
         # Pass through intermediate layers
-        x = self._forward_layers(x)
+        x = self._forward_layers(x, weight_temperature)
 
         # remove mixing dim
         x = x.squeeze(3)
@@ -82,7 +87,7 @@ class MixingEinet(Einet):
 
         return x
 
-    def _forward_layers(self, x):
+    def _forward_layers(self, x, weight_temperature=None):
         """
         Forward pass through the inner sum and product layers.
 
@@ -94,7 +99,7 @@ class MixingEinet(Einet):
         """
         # Forward to inner product and sum layers
         for layer in self.einsum_layers:
-            x = layer(x)
+            x = layer(x, weight_temperature=weight_temperature)
         return x
 
     def _build(self):
