@@ -2,6 +2,7 @@
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.data import get_data_shape, Dist, get_distribution
 from simple_einet.layers import AbstractLayer
+from simple_einet.mixing_einsum_layer import MixingEinsumLayer
 
 from nflows.transforms.base import CompositeTransform
 from nflows.transforms.autoregressive import MaskedAffineAutoregressiveTransform
@@ -141,19 +142,20 @@ def log_weight_distribution_per_layer(model):
             else:
                 weight_temperature = module.weight_temperature
                 param_projection = module.project_params
-                # log unnormalized
-                params = param_projection(module.einsum_weights)
-                params = params.cpu().detach()
-                np_hist = np.histogram(params, density=True)
-                wandb.log({f"parameters/{name}": wandb.Histogram(
-                    np_histogram=np_hist)})
-
-                shape = params.shape
-                params = params.view(
-                    *shape[:-2], shape[-2] ** 2)
-                params = F.softmax(params /
-                                   weight_temperature, dim=-1).cpu().detach()
-                np_hist_grads = np.histogram(params, density=True)
-                wandb.log({f"parameters_normalized/{name}": wandb.Histogram(
-                    np_histogram=np_hist_grads)})
-                # log normalized
+                if isinstance(module, MixingEinsumLayer):
+                    # log unnormalized
+                    params = param_projection(module.einsum_weights)
+                    params = params.cpu().detach()
+                    np_hist = np.histogram(params, density=True)
+                    wandb.log({f"parameters/{name}": wandb.Histogram(
+                        np_histogram=np_hist)})
+                    breakpoint()
+                    shape = params.shape
+                    params = params.view(
+                        *shape[:-2], shape[-2] ** 2)
+                    params = F.softmax(params /
+                                       weight_temperature, dim=-1).cpu().detach()
+                    np_hist_grads = np.histogram(params, density=True)
+                    wandb.log({f"parameters_normalized/{name}": wandb.Histogram(
+                        np_histogram=np_hist_grads)})
+                    # log normalized

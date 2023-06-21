@@ -10,7 +10,7 @@ from simple_einet.type_checks import check_valid
 from simple_einet.utils import SamplingContext, index_one_hot, diff_sample_one_hot
 
 
-class MixingEinsumLayer(AbstractLayer):
+class ResidualEinsumLayer(AbstractLayer):
     def __init__(
         self,
         num_features: int,
@@ -77,6 +77,27 @@ class MixingEinsumLayer(AbstractLayer):
         )
 
         self.einsum_weights = nn.Parameter(einsum_weights)
+
+        residual_einsum_weights = torch.randn(
+            self.num_features_out,
+            self.num_sums_out,
+            self.num_mixtures_out,
+            self.num_repetitions,
+            self.num_sums_in,
+            self.num_sums_in,
+        )
+
+        self.residual_einsum_weights = nn.Parameter(residual_einsum_weights)
+
+        residual_mixing_weights = torch.randn(
+            self.num_features_out,
+            self.num_sums_out * 2,
+            self.num_sums_out,
+            self.num_mixtures_out,
+            self.num_repetitions,
+        )
+
+        self.residual_mixing_weights = nn.Parameter(residual_mixing_weights)
 
         # product Dropout
         self.dropout = check_valid(
@@ -150,7 +171,26 @@ class MixingEinsumLayer(AbstractLayer):
 
         # LogEinsumExp trick, re-add the max
         prob = torch.log(prob) + left_max + right_max
-        identity = prob
+
+        # Project weights into valid space
+        residual_einsum_weights = self.residual_einsum_weights
+        residual_einsum_weights = self.project_params(residual_einsum_weights)
+        if not self.use_em:
+            residual_einsum_weights = residual_einsum_weights.view(
+                D_out, self.num_sums_out, self.num_mixtures_out, self.num_repetitions, -1)
+            residual_einsum_weights = F.softmax(
+                residual_einsum_weights/self.weight_temperature, dim=-1)
+            residual_einsum_weights = residual_einsum_weights.view(
+                self.residual_einsum_weights.shape)
+
+        # Einsum operation for sum(product(x))
+        # n: batch, i: left-channels, j: right-channels, d:features, o: output-channels, m: mixtures, r: repetitions
+        residual_prob = torch.einsum("ndimr,ndjmr,domrij->ndomr",
+                                     left_prob, right_prob, residual_einsum_weights)
+
+        # LogEinsumExp trick, re-add the max
+        residual_prob = torch.log(residual_prob) + left_max + right_max
+
         # Save input if input cache is enabled
         if self._is_input_cache_enabled:
             self._input_cache_left = left
@@ -182,17 +222,31 @@ class MixingEinsumLayer(AbstractLayer):
                 mixing_weights = F.softmax(
                     mixing_weights/self.weight_temperature, dim=-1)
 
-            probs_max = torch.max(prob, dim=3, keepdim=True)[0]
-            probs = torch.exp(prob - probs_max)
+            residual_probs_max = torch.max(
+                residual_prob, dim=3, keepdim=True)[0]
+            residual_prob = torch.exp(residual_prob - residual_probs_max)
 
             # n: batch, d: features, s: sums,  i: mixtures in, o: mixtures out, r: repetitions
-            out = torch.einsum("ndsir,dsori->ndsor", probs, mixing_weights)
-            prob = torch.log(out) + probs_max
+            out = torch.einsum("ndsir,dsori->ndsor",
+                               residual_prob, mixing_weights)
+            residual_prob = torch.log(out) + residual_probs_max
 
         # skip connections
-        if identity.shape == prob.shape:
-            prob = torch.stack((prob, identity), -1)
-            prob = torch.logsumexp(prob, dim=-1) - np.log(2)
+        if residual_prob.shape == prob.shape:
+            prob = torch.cat((prob, residual_prob), 2)
+            residual_mixing_weights = self.residual_mixing_weights
+            residual_mixing_weights = F.softmax(
+                residual_mixing_weights/self.weight_temperature, dim=1)
+            residual_mix_probs_max = torch.max(
+                prob, dim=2, keepdim=True)[0]
+            residual_mix_probs = torch.exp(prob - residual_mix_probs_max)
+
+            # n: batch, d: features, i: sums in,  o: sums out, m: mixtures, r: repetitions
+            out = torch.einsum("ndimr,diomr->ndomr",
+                               residual_mix_probs, residual_mixing_weights)
+            prob = torch.log(out) + residual_mix_probs_max
+        else:
+            prob = residual_prob
 
         if weight_temperature is not None:
             self.weight_temperature = self.weight_temperature_backup

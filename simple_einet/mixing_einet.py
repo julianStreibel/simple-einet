@@ -11,6 +11,7 @@ from torch import nn
 from simple_einet.distributions import AbstractLeaf, RatNormal, truncated_normal_, CustomCategorical
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer, LinsumLayer, LinsumLayerLogWeights
 from simple_einet.mixing_einsum_layer import MixingEinsumLayer
+from simple_einet.residual_einsum_layer import ResidualEinsumLayer
 from simple_einet.factorized_leaf_layer import FactorizedLeaf
 from simple_einet.layers import Sum
 from simple_einet.type_checks import check_valid
@@ -131,7 +132,7 @@ class MixingEinet(Einet):
             in_features = 2**i
 
             if self.config.cross_product:
-                layer = MixingEinsumLayer(
+                layer = ResidualEinsumLayer(
                     num_features=in_features,
                     num_sums_in=_num_sums_in,
                     num_sums_out=_num_sums_out,
