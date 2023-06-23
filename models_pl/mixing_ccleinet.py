@@ -171,7 +171,7 @@ class SpnMixingCCLEinet(LitModel):
             {"params": self.spn.einsum_layers.parameters()},
             {"params": self.spn._class_dist.parameters()},
             {"params": self.spn._joint_layer.parameters()},
-            {"params": self.spn.leaf.permutation_layer.parameters(), "lr": 0.99},
+            #            {"params": self.spn.leaf.permutation_layer.parameters(), "lr": 0.99},
             {"params": self.spn.leaf.base_leaf.parameters(
             ), "weight_decay": self.cfg.weight_decay}
         ], lr=self.learning_rate)

@@ -1,8 +1,8 @@
 defaults:
   - _self_
   - experiment: null
-  - override hydra/sweeper: optuna
-  - override hydra/sweeper/sampler: tpe
+  # - override hydra/job_logging: colorlog
+  # - override hydra/hydra_logging: colorlog
 
 # Default set of configurations.
 data_dir: ???
@@ -22,16 +22,16 @@ log_interval: 10
 classification: True
 device: "cuda"
 debug: False
-S: 5
+S: 10
 I: 10
-D: 6
-M: 2
-R: 2
+M: 1
+D: 3
+R: 1
 gpu: 0
 epochs: 10
 load_and_eval: False
 cp: True
-dist: "cclbinomial"
+dist: "binomial"
 precision: 16
 group_tag: ???
 tag: ???
@@ -47,17 +47,18 @@ num_steps_per_epoch: None
 leaf_dropout: 0
 sum_dropout: 0.0 # problem of no gradient if only one component
 tau: 0.0
+tau_decay: 1
 noise_std: 0.0
 gradient_clip_val: 0
 learn_permutations: False
 sinkhorn_tau: 1
 switch_permutation: False
+permutation_lr: 0.99
+permutation_switch_step_ratio_denominator: 8
 independent_colors: True
 shuffle_features: True
-
-mixing_depth: 0
+mixing_depth: 1
 num_hidden_mixtures: None
-
 use_em: False
 weight_temperature: 1.
 weight_temperature_decay: 0.99

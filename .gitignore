@@ -156,6 +156,7 @@ class_einet/
 datasets/
 multirun/
 explicit_mixing_einet/
+cnn_mixing_einet/
 
 visualization/
 

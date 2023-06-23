@@ -8,6 +8,7 @@ from torch import nn
 from simple_einet.distributions import CustomCategorical
 from simple_einet.mixing_einsum_layer import MixingEinsumLayer
 from simple_einet.einsum_layer import EinsumLayer, EinsumMixingLayer
+from simple_einet.residual_einsum_layer import ResidualEinsumLayer
 from simple_einet.utils import SamplingContext, provide_evidence
 from simple_einet.einet import EinetConfig, Einet
 from simple_einet.factorized_leaf_layer import CCLFactorizedLeaf
@@ -108,7 +109,7 @@ class MixingCCLEinet(Einet):
 
             in_features = 2 ** i
 
-            layer = MixingEinsumLayer(
+            layer = ResidualEinsumLayer(
                 num_features=in_features,
                 num_sums_in=_num_sums_in,
                 num_sums_out=self.config.num_sums,

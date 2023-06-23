@@ -23,7 +23,12 @@ import numpy as np
 DATALOADER_ID_TO_SET_NAME = {0: "train", 1: "val", 2: "test"}
 
 
-def make_einet(cfg, num_classes: int = 1, einet_class=Einet, num_features_multiplyer=1):
+def make_einet(
+        cfg,
+        num_classes: int = 1,
+        einet_class=Einet,
+        num_features_multiplyer=1,
+        num_channels_multiplyer=1):
     """
     Make an EinsumNetworks model based off the given arguments.
 
@@ -56,7 +61,7 @@ def make_einet(cfg, num_classes: int = 1, einet_class=Einet, num_features_multip
     else:
         config = EinetConfig(
             num_features=image_shape.num_pixels,
-            num_channels=image_shape.channels,
+            num_channels=image_shape.channels * num_channels_multiplyer,
             depth=cfg.D,
             num_sums=cfg.S,
             num_mixes=cfg.M,

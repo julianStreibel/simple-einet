@@ -7,3 +7,4 @@ from models_pl.flow_spn import *
 from models_pl.class_einet import *
 from models_pl.flow_spn_z import *
 from models_pl.explicit_mixing_einet import *
+from models_pl.cnn_mixing_einet import *

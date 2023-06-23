@@ -5,7 +5,7 @@ metric:
   name: Test/val_accuracy
 parameters:
   batch_size:
-    max: 300
+    max: 200
     min: 10
     distribution: int_uniform
   lr:
@@ -13,25 +13,20 @@ parameters:
     min: 0.000001
     distribution: uniform
   S:
-    max: 5
-    min: 1
-    distribution: int_uniform
+    value: 5
   R:
-    max: 5
-    min: 1
-    distribution: int_uniform
+    value: 1
   I:
-    max: 5
-    min: 1
-    distribution: int_uniform
+    value: 5
   D:
-    max: 9
-    min: 3
-    distribution: int_uniform
+    value: 7
   M:
-    max: 5
-    min: 1
-    distribution: int_uniform
+    value: 10
+  mixing_depth:
+    value: 2 
+  num_hidden_mixtures:
+    value: 10
+  
 command:
   - ${env}
   - python
